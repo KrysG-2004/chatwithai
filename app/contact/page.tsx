@@ -23,8 +23,10 @@ export default function ContactPage() {
         body: JSON.stringify(formData),
       })
 
+      const data = await response.json()
+
       if (!response.ok) {
-        throw new Error('发送失败')
+        throw new Error(data.error || '发送失败')
       }
 
       setStatus('success')
