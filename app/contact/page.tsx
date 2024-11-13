@@ -33,6 +33,7 @@ export default function ContactPage() {
       // 3秒后重置状态
       setTimeout(() => setStatus('idle'), 3000)
     } catch (error) {
+      console.error('发送失败:', error)
       setStatus('error')
       setTimeout(() => setStatus('idle'), 3000)
     }

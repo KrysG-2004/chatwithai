@@ -1,7 +1,7 @@
 import OpenAI from 'openai'
 import { NextResponse } from 'next/server'
 
-const API_KEY = 'sk-e13f13ba537e48c7b96fbb2e449aa84b'
+const API_KEY = process.env.DEEPSEEK_API_KEY
 
 const openai = new OpenAI({
   apiKey: API_KEY,
