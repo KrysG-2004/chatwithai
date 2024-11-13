@@ -1,11 +1,12 @@
 import OpenAI from 'openai'
 import { NextResponse } from 'next/server'
 
-const API_KEY = process.env.DEEPSEEK_API_KEY
+const API_KEY = 'sk-e13f13ba537e48c7b96fbb2e449aa84b'
 
 const openai = new OpenAI({
   apiKey: API_KEY,
   baseURL: 'https://api.deepseek.com/v1',
+  dangerouslyAllowBrowser: true
 })
 
 export async function POST(req: Request) {
@@ -24,9 +25,7 @@ export async function POST(req: Request) {
     const textStream = new ReadableStream({
       async start(controller) {
         for await (const chunk of stream) {
-          // 检查是否有新的内容
           if (chunk.choices[0]?.delta?.content) {
-            // 将数据格式化为 SSE 格式
             const text = `data: ${JSON.stringify(chunk)}\n\n`
             controller.enqueue(new TextEncoder().encode(text))
           }
