@@ -9,7 +9,6 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@stripe/stripe-js": "^4.10.0",
     "firebase": "^11.0.2",
     "framer-motion": "^11.11.13",
     "mammoth": "^1.8.0",
@@ -23,8 +22,7 @@
     "react-firebase-hooks": "^5.1.1",
     "react-markdown": "^9.0.1",
     "rehype-raw": "^7.0.0",
-    "remark-gfm": "^4.0.0",
-    "stripe": "^17.3.1"
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.6",
