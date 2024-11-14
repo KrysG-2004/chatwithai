@@ -9,7 +9,11 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "timestamp",
+          "fieldPath": "lastUpdated",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
           "order": "DESCENDING"
         }
       ]
@@ -24,5 +28,6 @@
         }
       ]
     }
-  ]
+  ],
+  "fieldOverrides": []
 } 

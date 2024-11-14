@@ -1,199 +1,218 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
-
-interface PricingFeature {
-  name: string
-  basic: boolean
-  pro: boolean
-  enterprise: boolean
-}
-
-const features: PricingFeature[] = [
-  { name: 'AI 对话', basic: true, pro: true, enterprise: true },
-  { name: 'GPT-3.5 模型', basic: true, pro: true, enterprise: true },
-  { name: '每日对话限制', basic: true, pro: false, enterprise: false },
-  { name: 'GPT-4 模型', basic: false, pro: true, enterprise: true },
-  { name: '文件处理能力', basic: false, pro: true, enterprise: true },
-  { name: '图片生成', basic: false, pro: true, enterprise: true },
-  { name: '高级 API 访问', basic: false, pro: false, enterprise: true },
-  { name: '定制模型训练', basic: false, pro: false, enterprise: true },
-  { name: '团队协作功能', basic: false, pro: false, enterprise: true },
-  { name: '优先技术支持', basic: false, pro: true, enterprise: true },
-]
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { useCredits } from '@/app/hooks/useCredits'
+import { motion } from 'framer-motion'
+import { auth } from '@/lib/firebase'
+import { useAuthState } from 'react-firebase-hooks/auth'
 
 export default function PricingPage() {
-  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'yearly'>('monthly')
+  const [user] = useAuthState(auth)
+  const router = useRouter()
+  const { addCredits } = useCredits()
+  const [loading, setLoading] = useState(false)
+  const [selectedPlan, setSelectedPlan] = useState<number | null>(null)
 
-  const getPrice = (plan: 'basic' | 'pro' | 'enterprise') => {
-    if (plan === 'basic') return '0'
-    if (plan === 'pro') return billingPeriod === 'monthly' ? '99' : '990'
-    return '定制'
+  const plans = [
+    {
+      name: '基础套餐',
+      credits: 100,
+      price: 10,
+      features: [
+        '基础AI对话功能',
+        '文本分析能力',
+        '基础文件处理',
+        '7天历史记录',
+        '标准响应速度'
+      ],
+      description: '适合个人日常使用，满足基本的AI对话需求',
+      color: 'from-blue-500/20 to-purple-500/20',
+      icon: '🌟'
+    },
+    {
+      name: '专业套餐',
+      credits: 500,
+      price: 45,
+      features: [
+        '高级AI对话功能',
+        '深度文本分析',
+        '多种文件格式支持',
+        '30天历史记录',
+        '优先响应速度',
+        '专业技术支持'
+      ],
+      description: '为专业用户打造，提供更强大的功能和更好的体验',
+      color: 'from-purple-500/20 to-pink-500/20',
+      icon: '⭐',
+      popular: true
+    },
+    {
+      name: '企业套餐',
+      credits: 1200,
+      price: 99,
+      features: [
+        '企业级AI对话',
+        'API集成支持',
+        '无限文件处理',
+        '永久历史记录',
+        'VIP响应速度',
+        '24/7专属支持',
+        '自定义模型训练'
+      ],
+      description: '为企业级用户提供最强大的功能和最优质的服务',
+      color: 'from-pink-500/20 to-rose-500/20',
+      icon: '💫'
+    }
+  ]
+
+  const handlePurchase = async (credits: number) => {
+    setLoading(true)
+    try {
+      // 这里添加实际的支付逻辑
+      await addCredits(credits)
+      router.push('/chat')
+    } catch (error) {
+      console.error('购买失败:', error)
+    } finally {
+      setLoading(false)
+    }
   }
 
+  // 修改导航逻辑
+  useEffect(() => {
+    // 如果用户已登录，直接添加返回路径
+    if (user) {
+      window.history.pushState({ from: 'pricing' }, '', '/pricing')
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      event.preventDefault()
+      if (user) {
+        router.push('/chat')
+      } else {
+        router.push('/')
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [user, router])
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black py-20">
-      <div className="max-w-6xl mx-auto px-4">
-        <div className="text-center mb-12">
-          <h1 className="text-3xl font-medium text-green-400 mb-4">选择适合您的方案</h1>
-          <p className="text-green-400/70 mb-8">所有方案均提供 14 天免费试用</p>
-          
-          {/* 计费周期切换 */}
-          <div className="inline-flex items-center bg-black/40 rounded-lg p-1 border border-green-500/20">
-            <button
-              onClick={() => setBillingPeriod('monthly')}
-              className={`px-4 py-2 rounded-md text-sm transition-colors ${
-                billingPeriod === 'monthly'
-                  ? 'bg-green-500/20 text-green-400'
-                  : 'text-green-400/70 hover:text-green-400'
-              }`}
-            >
-              月付
-            </button>
-            <button
-              onClick={() => setBillingPeriod('yearly')}
-              className={`px-4 py-2 rounded-md text-sm transition-colors ${
-                billingPeriod === 'yearly'
-                  ? 'bg-green-500/20 text-green-400'
-                  : 'text-green-400/70 hover:text-green-400'
-              }`}
-            >
-              年付
-              <span className="ml-1 text-xs text-green-500">省20%</span>
-            </button>
-          </div>
-        </div>
+    <div className="min-h-screen bg-gradient-to-b from-gray-950 to-black py-20">
+      <div className="max-w-7xl mx-auto px-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center mb-16"
+        >
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 text-transparent bg-clip-text mb-4">
+            选择最适合你的套餐
+          </h1>
+          <p className="text-purple-300/70 max-w-2xl mx-auto">
+            我们提供多种灵活的套餐选择，满足不同用户的不同需求。所有套餐都包含核心AI功能，
+            随着套餐等级提升，您将获得更多高级特性和优先支持。
+          </p>
+        </motion.div>
         
-        <div className="grid md:grid-cols-3 gap-8">
-          {/* 基础版 */}
-          <div className="bg-gray-900 rounded-xl border border-green-500/20 p-6 hover:border-green-500/40 transition-all hover:transform hover:scale-[1.02]">
-            <h3 className="text-xl font-medium text-green-400 mb-2">基础版</h3>
-            <div className="text-3xl text-green-500 mb-4">
-              ¥{getPrice('basic')}
-              <span className="text-sm text-green-400/70 ml-1">/{billingPeriod === 'monthly' ? '月' : '年'}</span>
-            </div>
-            <p className="text-sm text-green-400/70 mb-6">适合个人用户和学习使用</p>
-            <div className="space-y-4 mb-6">
-              {features.map((feature, index) => (
-                <div key={index} className="flex items-center text-sm">
-                  {feature.basic ? (
-                    <svg className="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {plans.map((plan, index) => (
+            <motion.div
+              key={plan.name}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.2 }}
+              className={`relative bg-gradient-to-br ${plan.color} 
+                rounded-2xl border border-purple-500/20 p-8
+                hover:border-purple-500/40 transition-all duration-300
+                backdrop-blur-xl shadow-lg`}
+              onMouseEnter={() => setSelectedPlan(index)}
+              onMouseLeave={() => setSelectedPlan(null)}
+            >
+              {plan.popular && (
+                <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-purple-500/90 
+                  text-white text-xs px-4 py-1 rounded-full">
+                  最受欢迎
+                </div>
+              )}
+              
+              <div className="text-4xl mb-4">{plan.icon}</div>
+              <h2 className="text-2xl font-bold text-purple-300 mb-2">{plan.name}</h2>
+              <div className="text-3xl font-bold text-purple-300 mb-4">
+                ¥{plan.price}
+                <span className="text-sm text-purple-300/70 ml-2">/ {plan.credits} 积分</span>
+              </div>
+              
+              <p className="text-purple-300/70 text-sm mb-6">
+                {plan.description}
+              </p>
+              
+              <div className="space-y-3 mb-8">
+                {plan.features.map((feature, i) => (
+                  <motion.div
+                    key={feature}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.2 + i * 0.1 }}
+                    className="flex items-center text-sm text-purple-300/90"
+                  >
+                    <svg className="w-4 h-4 mr-2 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                  ) : (
-                    <svg className="w-5 h-5 text-green-500/30 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
-                  <span className={feature.basic ? 'text-green-400' : 'text-green-400/50'}>
-                    {feature.name}
-                  </span>
-                </div>
+                    {feature}
+                  </motion.div>
+                ))}
+              </div>
+              
+              <motion.button
+                onClick={() => handlePurchase(plan.credits)}
+                disabled={loading}
+                className={`w-full py-3 rounded-xl bg-purple-500/20 text-purple-300 
+                  hover:bg-purple-500/30 transition-all duration-300
+                  border border-purple-500/30 text-sm font-medium
+                  disabled:opacity-50 disabled:cursor-not-allowed
+                  ${selectedPlan === index ? 'scale-105' : 'scale-100'}`}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                {loading ? '处理中...' : '立即购买'}
+              </motion.button>
+              
+              {/* 装饰性粒子 */}
+              {selectedPlan === index && [...Array(5)].map((_, i) => (
+                <motion.div
+                  key={i}
+                  className="absolute w-1 h-1 bg-purple-400/30 rounded-full"
+                  style={{
+                    top: `${Math.random() * 100}%`,
+                    left: `${Math.random() * 100}%`,
+                  }}
+                  animate={{
+                    y: [0, -10, 0],
+                    opacity: [0.3, 0.6, 0.3],
+                  }}
+                  transition={{
+                    duration: 2 + Math.random() * 2,
+                    repeat: Infinity,
+                    delay: i * 0.2,
+                  }}
+                />
               ))}
-            </div>
-            <Link
-              href="/"
-              className="block w-full py-2 rounded-lg bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 text-center text-sm transition-colors"
-            >
-              开始使用
-            </Link>
-          </div>
-
-          {/* 专业版 */}
-          <div className="bg-gray-900 rounded-xl border border-green-500/30 p-6 transform scale-105 relative">
-            <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-green-500 text-black text-xs px-3 py-1 rounded-full">
-              最受欢迎
-            </div>
-            <h3 className="text-xl font-medium text-green-400 mb-2">专业版</h3>
-            <div className="text-3xl text-green-500 mb-4">
-              ¥{getPrice('pro')}
-              <span className="text-sm text-green-400/70 ml-1">/{billingPeriod === 'monthly' ? '月' : '年'}</span>
-            </div>
-            <p className="text-sm text-green-400/70 mb-6">适合专业用户和小型团队</p>
-            <div className="space-y-4 mb-6">
-              {features.map((feature, index) => (
-                <div key={index} className="flex items-center text-sm">
-                  {feature.pro ? (
-                    <svg className="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5 text-green-500/30 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
-                  <span className={feature.pro ? 'text-green-400' : 'text-green-400/50'}>
-                    {feature.name}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <Link
-              href="/contact?plan=pro"
-              className="block w-full py-2 rounded-lg bg-green-500 text-black hover:bg-green-600 text-center text-sm transition-colors"
-            >
-              立即升级
-            </Link>
-          </div>
-
-          {/* 企业版 */}
-          <div className="bg-gray-900 rounded-xl border border-green-500/20 p-6 hover:border-green-500/40 transition-all hover:transform hover:scale-[1.02]">
-            <h3 className="text-xl font-medium text-green-400 mb-2">企业版</h3>
-            <div className="text-3xl text-green-500 mb-4">
-              {getPrice('enterprise')}
-              <span className="text-sm text-green-400/70 ml-1">方案</span>
-            </div>
-            <p className="text-sm text-green-400/70 mb-6">适合大型企业和高级需求</p>
-            <div className="space-y-4 mb-6">
-              {features.map((feature, index) => (
-                <div key={index} className="flex items-center text-sm">
-                  {feature.enterprise ? (
-                    <svg className="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5 text-green-500/30 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
-                  <span className={feature.enterprise ? 'text-green-400' : 'text-green-400/50'}>
-                    {feature.name}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <Link
-              href="/contact?plan=enterprise"
-              className="block w-full py-2 rounded-lg bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 text-center text-sm transition-colors"
-            >
-              联系销售
-            </Link>
-          </div>
+            </motion.div>
+          ))}
         </div>
 
-        {/* FAQ 部分 */}
-        <div className="mt-20">
-          <h2 className="text-2xl font-medium text-green-400 text-center mb-8">常见问题</h2>
-          <div className="grid md:grid-cols-2 gap-8">
-            <div className="bg-gray-900/50 rounded-lg p-6 border border-green-500/20">
-              <h3 className="text-green-400 font-medium mb-2">如何开始使用？</h3>
-              <p className="text-green-400/70 text-sm">注册账号后即可开始 14 天免费试用，无需信用卡。试用期间可以体验所有专业版功能。</p>
-            </div>
-            <div className="bg-gray-900/50 rounded-lg p-6 border border-green-500/20">
-              <h3 className="text-green-400 font-medium mb-2">可以随时更改计划吗？</h3>
-              <p className="text-green-400/70 text-sm">是的，您可以随时升级或降级您的计划。费用会按比例计算。</p>
-            </div>
-            <div className="bg-gray-900/50 rounded-lg p-6 border border-green-500/20">
-              <h3 className="text-green-400 font-medium mb-2">支持哪些付款方式？</h3>
-              <p className="text-green-400/70 text-sm">我们支持支付宝、微信支付、银行卡等多种付款方式。企业用户可以申请对公转账。</p>
-            </div>
-            <div className="bg-gray-900/50 rounded-lg p-6 border border-green-500/20">
-              <h3 className="text-green-400 font-medium mb-2">有退款政策吗？</h3>
-              <p className="text-green-400/70 text-sm">如果您在购买后 7 天内不满意，我们提供无条件退款。</p>
-            </div>
-          </div>
-        </div>
+        {/* 底部说明 */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.8 }}
+          className="mt-16 text-center text-purple-300/50 text-sm"
+        >
+          <p>所有套餐均支持随时升级或续费</p>
+          <p className="mt-2">如需企业定制方案，请联系我们的客服团队</p>
+        </motion.div>
       </div>
     </div>
   )

@@ -1,8 +1,35 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { auth } from '@/lib/firebase'
+import { useAuthState } from 'react-firebase-hooks/auth'
+import { useEffect } from 'react'
 
 export default function ContactPage() {
+  const [user] = useAuthState(auth)
+  const router = useRouter()
+
+  // 修改导航逻辑
+  useEffect(() => {
+    // 如果用户已登录，直接添加返回路径
+    if (user) {
+      window.history.pushState({ from: 'contact' }, '', '/contact')
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      event.preventDefault()
+      if (user) {
+        router.push('/chat')
+      } else {
+        router.push('/')
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [user, router])
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -114,7 +141,7 @@ export default function ContactPage() {
 
             {status === 'error' && (
               <div className="text-red-400 text-sm text-center">
-                发送失败，请稍后重试。
+                发送失败，稍后重试。
               </div>
             )}
           </form>

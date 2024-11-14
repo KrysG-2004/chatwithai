@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import ChatHeader from './ChatHeader'
 import ChatInput from './ChatInput'
 import MessageList from './MessageList'
@@ -11,7 +11,8 @@ import { auth } from '@/lib/firebase'
 import { useRouter } from 'next/navigation'
 import ChatHistory from './ChatHistory'
 import { db } from '@/lib/firebase'
-import { collection, addDoc, serverTimestamp, getDocs, query, where, orderBy, limit, updateDoc, deleteDoc, doc } from 'firebase/firestore'
+import { collection, addDoc, serverTimestamp, getDocs, query, where, orderBy, limit, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore'
+import { useCredits } from '../hooks/useCredits'
 
 export default function ChatInterface() {
   const [user] = useAuthState(auth)
@@ -19,14 +20,20 @@ export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
-  const [showHistory, setShowHistory] = useState(true)
+  const [showHistory, setShowHistory] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { credits, useCredit } = useCredits()
+  const [isGenerating, setIsGenerating] = useState(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   // 如果用户登录，重定向到首页
   useEffect(() => {
     if (!user) {
       router.push('/')
+    } else {
+      // 加载最近的聊天记录，而不是直接创建新聊天
+      loadRecentChat()
     }
   }, [user, router])
 
@@ -44,218 +51,164 @@ export default function ChatInterface() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [hasUnsavedChanges])
 
-  // 加载最近的聊天记录
-  useEffect(() => {
-    if (user) {
-      loadRecentChat()
-    }
-  }, [user])
-
-  const loadRecentChat = async () => {
-    try {
-      const sessionsRef = collection(db, 'chatSessions')
-      const q = query(
-        sessionsRef,
-        where('userId', '==', user?.uid),
-        orderBy('timestamp', 'desc'),
-        limit(1)
-      )
-      
-      const querySnapshot = await getDocs(q)
-      if (!querySnapshot.empty) {
-        const sessionDoc = querySnapshot.docs[0]
-        setCurrentSessionId(sessionDoc.id)
-        
-        // 加载该会话的消息
-        const messagesRef = collection(db, 'chatSessions', sessionDoc.id, 'messages')
-        const messagesQuery = query(messagesRef, orderBy('timestamp'))
-        const messagesSnap = await getDocs(messagesQuery)
-        
-        const loadedMessages = messagesSnap.docs.map(doc => ({
-          id: doc.id,
-          content: doc.data().content,
-          role: doc.data().role,
-          createdAt: doc.data().timestamp.toDate().toISOString(),
-          status: 'sent' as const
-        }))
-        
-        setMessages(loadedMessages)
-      }
-    } catch (error) {
-      console.error('加载最近聊天记录失败:', error)
-    }
-  }
-
-  const saveMessageToFirestore = async (message: Message) => {
-    if (!user) return null;
+  const handleNewChat = async () => {
+    if (!user) return;
 
     try {
-      // 如果是新对话，先创建会话
-      if (!currentSessionId) {
-        const sessionRef = await addDoc(collection(db, 'chatSessions'), {
-          userId: user.uid,
-          title: message.content.slice(0, 50) + '...',
-          timestamp: serverTimestamp(),
-          summary: null, // 等待AI生成摘要
-          lastUpdated: serverTimestamp() // 添加最后更新时间
-        });
-        setCurrentSessionId(sessionRef.id);
-        
-        // 保存第一条消息
-        await addDoc(collection(db, 'chatSessions', sessionRef.id, 'messages'), {
-          content: message.content,
-          role: message.role,
-          timestamp: serverTimestamp(),
-          status: message.status
-        });
-        
-        return sessionRef.id;
-      }
-
-      // 保存消息到现有会话
-      await addDoc(collection(db, 'chatSessions', currentSessionId, 'messages'), {
-        content: message.content,
-        role: message.role,
+      // 创建新的聊天会话
+      const sessionRef = await addDoc(collection(db, 'chatSessions'), {
+        userId: user.uid,
+        title: '新对话',
         timestamp: serverTimestamp(),
-        status: message.status
-      });
-
-      // 更新会话的最后更新时间
-      await updateDoc(doc(db, 'chatSessions', currentSessionId), {
         lastUpdated: serverTimestamp()
       });
 
-      return currentSessionId;
+      // 添加欢迎消息
+      const welcomeMessage: Message = {
+        id: crypto.randomUUID(),
+        content: '你好！我是 AI 助手，有什么我可以帮你的吗？',
+        role: 'assistant',
+        createdAt: new Date().toISOString(),
+        status: 'sent'
+      };
+
+      // 保存欢迎消息到数据库
+      await addDoc(collection(db, 'chatSessions', sessionRef.id, 'messages'), {
+        content: welcomeMessage.content,
+        role: welcomeMessage.role,
+        timestamp: serverTimestamp(),
+        status: welcomeMessage.status
+      });
+
+      setCurrentSessionId(sessionRef.id);
+      setMessages([welcomeMessage]);
+      setShowHistory(false);
     } catch (error) {
-      console.error('保存消息失败:', error);
-      setError('保存失败，请重试');
-      return null;
+      console.error('创建新聊天失败:', error);
     }
   };
 
   const handleSendMessage = async (content: string) => {
-    if (!content.trim()) return
-    setHasUnsavedChanges(true)
-
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      content,
-      role: 'user',
-      createdAt: new Date().toISOString(),
-      status: 'sent'
-    }
-
-    setMessages(prev => [...prev, userMessage])
-
-    const aiMessage: Message = {
-      id: crypto.randomUUID(),
-      content: '',
-      role: 'assistant',
-      createdAt: new Date().toISOString(),
-      status: 'sending'
-    }
+    if (!user) return;
     
-    setMessages(prev => [...prev, aiMessage])
+    // 检查积分
+    const canProceed = await useCredit();
+    if (!canProceed) return;
+
+    if (!content.trim()) return;
 
     try {
-      const apiMessages = messages.concat(userMessage).map(msg => ({
-        role: msg.role as 'user' | 'assistant' | 'system',
-        content: msg.content
-      }))
-
-      const stream = await sendChatMessage(apiMessages)
-      let fullContent = ''
-      
-      for await (const chunk of stream) {
-        if (chunk.choices?.[0]?.delta?.content) {
-          const content = chunk.choices[0].delta.content
-          fullContent += content
-          setMessages(prev => 
-            prev.map(msg => 
-              msg.id === aiMessage.id 
-                ? { ...msg, content: fullContent }
-                : msg
-            )
-          )
-        }
+      // 如果没有当前会话，创建一个新的
+      let sessionId = currentSessionId;
+      if (!sessionId) {
+        const sessionRef = await addDoc(collection(db, 'chatSessions'), {
+          userId: user.uid,
+          title: content.slice(0, 50) + '...',
+          timestamp: serverTimestamp(),
+          lastUpdated: serverTimestamp()
+        });
+        sessionId = sessionRef.id;
+        setCurrentSessionId(sessionId);
       }
 
-      // 更新AI消息状态
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === aiMessage.id 
-            ? { ...msg, content: fullContent, status: 'sent' }
-            : msg
-        )
-      )
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        content,
+        role: 'user',
+        createdAt: new Date().toISOString(),
+        status: 'sent'
+      };
 
-      // 修改这里：使用同一个会话ID保存消息
+      // 保存用户消息到当前会话
+      await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
+        content: userMessage.content,
+        role: userMessage.role,
+        timestamp: serverTimestamp(),
+        status: userMessage.status
+      });
+
+      // 更新会话的最后更新时间
+      await updateDoc(doc(db, 'chatSessions', sessionId), {
+        lastUpdated: serverTimestamp()
+      });
+
+      setMessages(prev => [...prev, userMessage]);
+
+      // AI 回复
+      const aiMessage: Message = {
+        id: crypto.randomUUID(),
+        content: '',
+        role: 'assistant',
+        createdAt: new Date().toISOString(),
+        status: 'sending'
+      };
+      
+      setMessages(prev => [...prev, aiMessage]);
+      setIsGenerating(true);
+
       try {
-        // 如果没有当前会话ID，创建新会话
-        if (!currentSessionId) {
-          const sessionRef = await addDoc(collection(db, 'chatSessions'), {
-            userId: user?.uid,
-            title: userMessage.content.slice(0, 50) + '...',
-            timestamp: serverTimestamp(),
-            summary: null,
-            lastUpdated: serverTimestamp()
-          });
-          setCurrentSessionId(sessionRef.id);
-          
-          // 保存用户消息
-          await addDoc(collection(db, 'chatSessions', sessionRef.id, 'messages'), {
-            content: userMessage.content,
-            role: userMessage.role,
-            timestamp: serverTimestamp(),
-            status: userMessage.status
-          });
-          
-          // 保存AI回复
-          await addDoc(collection(db, 'chatSessions', sessionRef.id, 'messages'), {
-            content: fullContent,
-            role: 'assistant',
-            timestamp: serverTimestamp(),
-            status: 'sent'
-          });
-        } else {
-          // 使用现有会话ID保存消息
-          await addDoc(collection(db, 'chatSessions', currentSessionId, 'messages'), {
-            content: userMessage.content,
-            role: userMessage.role,
-            timestamp: serverTimestamp(),
-            status: userMessage.status
-          });
-          
-          await addDoc(collection(db, 'chatSessions', currentSessionId, 'messages'), {
-            content: fullContent,
-            role: 'assistant',
-            timestamp: serverTimestamp(),
-            status: 'sent'
-          });
+        const apiMessages = messages.concat(userMessage).map(msg => ({
+          role: msg.role as 'user' | 'assistant' | 'system',
+          content: msg.content
+        }));
 
-          // 更新会话的最后更新时间
-          await updateDoc(doc(db, 'chatSessions', currentSessionId), {
-            lastUpdated: serverTimestamp()
-          });
-        }
+        abortControllerRef.current = new AbortController();
+        const stream = await sendChatMessage(apiMessages, abortControllerRef.current.signal);
+        let fullContent = '';
         
-        setHasUnsavedChanges(false);
+        for await (const chunk of stream) {
+          if (chunk.choices?.[0]?.delta?.content) {
+            const content = chunk.choices[0].delta.content;
+            fullContent += content;
+            setMessages(prev => 
+              prev.map(msg => 
+                msg.id === aiMessage.id 
+                  ? { ...msg, content: fullContent }
+                  : msg
+              )
+            );
+          }
+        }
+
+        // 保存完整的 AI 回复到数据库
+        await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
+          content: fullContent,
+          role: 'assistant',
+          timestamp: serverTimestamp(),
+          status: 'sent'
+        });
+
+        // 更新会话的最后更新时间
+        await updateDoc(doc(db, 'chatSessions', sessionId), {
+          lastUpdated: serverTimestamp()
+        });
+
+        setMessages(prev => 
+          prev.map(msg => 
+            msg.id === aiMessage.id 
+              ? { ...msg, content: fullContent, status: 'sent' }
+              : msg
+          )
+        );
+
       } catch (error) {
-        console.error('保存消息失败:', error);
-        setHasUnsavedChanges(true);
+        console.error('AI 回复失败:', error);
+        setMessages(prev => 
+          prev.map(msg => 
+            msg.id === aiMessage.id 
+              ? { ...msg, status: 'error' }
+              : msg
+          )
+        );
+      } finally {
+        setIsGenerating(false);
+        abortControllerRef.current = null;
       }
 
     } catch (error) {
-      console.error('API 调用错误:', error)
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === aiMessage.id 
-            ? { ...msg, status: 'error' }
-            : msg
-        )
-      )
+      console.error('保存消息失败:', error);
     }
-  }
+  };
 
   const handleSelectChat = (historicalMessages: Message[]) => {
     setMessages(historicalMessages)
@@ -322,35 +275,29 @@ export default function ChatInterface() {
   };
 
   const handleFileSelect = async (file: File) => {
+    if (!user) return;
+    
+    const uploadingMessageId = crypto.randomUUID()
+    const uploadingMessage: Message = {
+      id: uploadingMessageId,
+      content: `正在上传文件: ${file.name}...`,
+      role: 'system',
+      createdAt: new Date().toISOString(),
+      status: 'sending'
+    }
+    
+    setMessages(prev => [...prev, uploadingMessage])
+
     try {
-      // 添加上传状态消息
-      const uploadingMessage: Message = {
-        id: crypto.randomUUID(),
-        content: `正在上传文件: ${file.name}...`,
-        role: 'system',
-        createdAt: new Date().toISOString(),
-        status: 'sending'
-      }
-      setMessages(prev => [...prev, uploadingMessage])
-
-      // 检查文件类型和大小
-      const maxSize = 10 * 1024 * 1024 // 10MB
-      if (file.size > maxSize) {
-        throw new Error('文件大小不能超过10MB')
-      }
-
-      const allowedTypes = ['application/pdf', 'text/plain', 'application/msword', 
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
-      if (!allowedTypes.includes(file.type)) {
-        throw new Error('只支持PDF、TXT和Word文档格式')
-      }
-
       const formData = new FormData()
       formData.append('file', file)
       
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
+        headers: {
+          'x-user-id': user.uid
+        }
       })
 
       if (!response.ok) {
@@ -359,21 +306,23 @@ export default function ChatInterface() {
 
       const data = await response.json()
       
-      // 更新上传成功消息
-      const fileMessage: Message = {
+      if (!data.fileContent || data.fileContent === '无法提取文件内容') {
+        throw new Error('无法提取文件内容')
+      }
+
+      // 更新消息列表
+      setMessages(prev => prev.filter(msg => msg.id !== uploadingMessageId))
+
+      // 添加用户消息（只显示文件名）
+      const userMessage: Message = {
         id: crypto.randomUUID(),
-        content: `已上传文件: ${file.name}\n文件路径: ${data.filePath}`,
+        content: `我上传了文件：${file.name}`,
         role: 'user',
         createdAt: new Date().toISOString(),
         status: 'sent'
       }
 
-      // 除上传中消息，添加成功消息
-      setMessages(prev => prev.filter(msg => msg.id !== uploadingMessage.id)
-        .concat(fileMessage))
-      await saveMessageToFirestore(fileMessage)
-
-      // 添加 AI 分析消息
+      // 自动发送给 AI 分析（包含完整内容）
       const aiMessage: Message = {
         id: crypto.randomUUID(),
         content: '',
@@ -382,54 +331,64 @@ export default function ChatInterface() {
         status: 'sending'
       }
       
-      setMessages(prev => [...prev, aiMessage])
+      setMessages(prev => [...prev, userMessage, aiMessage])
 
-      // 发送文件内容给 AI 分析
-      const apiMessages = [
-        {
-          role: 'user' as const,
-          content: `我上传了一个文件：${file.name}，请帮我分析文件内容。\n文件路径：${data.filePath}`
-        }
-      ]
+      try {
+        const apiMessages = [
+          ...messages,
+          {
+            role: 'user' as const,
+            content: `我上传了文件：${file.name}\n\n文件内容：\n${data.fileContent}`
+          }
+        ]
 
-      const stream = await sendChatMessage(apiMessages)
-      let fullContent = ''
-      
-      for await (const chunk of stream) {
-        if (chunk.choices?.[0]?.delta?.content) {
-          const content = chunk.choices[0].delta.content
-          fullContent += content
-          setMessages(prev => 
-            prev.map(msg => 
-              msg.id === aiMessage.id 
-                ? { ...msg, content: fullContent }
-                : msg
+        const stream = await sendChatMessage(apiMessages)
+        let fullContent = ''
+        
+        for await (const chunk of stream) {
+          if (chunk.choices?.[0]?.delta?.content) {
+            const content = chunk.choices[0].delta.content
+            fullContent += content
+            setMessages(prev => 
+              prev.map(msg => 
+                msg.id === aiMessage.id 
+                  ? { ...msg, content: fullContent }
+                  : msg
+              )
             )
-          )
+          }
         }
+
+        // 更新AI消息状态
+        setMessages(prev => 
+          prev.map(msg => 
+            msg.id === aiMessage.id 
+              ? { ...msg, content: fullContent, status: 'sent' }
+              : msg
+          )
+        )
+
+      } catch (error) {
+        console.error('AI 分析失败:', error)
+        setMessages(prev => 
+          prev.map(msg => 
+            msg.id === aiMessage.id 
+              ? { ...msg, content: '分析文件内容时出错', status: 'error' }
+              : msg
+          )
+        )
       }
 
-      // 更新 AI 消息状态
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === aiMessage.id 
-            ? { ...msg, content: fullContent, status: 'sent' }
-            : msg
-        )
-      )
-
-      await saveMessageToFirestore({...aiMessage, content: fullContent})
-
     } catch (error) {
-      // 显示错误消息
+      console.error('文件处理失败:', error)
       const errorMessage: Message = {
         id: crypto.randomUUID(),
-        content: `文件上传失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        content: `文件处理失败: ${error instanceof Error ? error.message : '未知错误'}`,
         role: 'system',
         createdAt: new Date().toISOString(),
         status: 'error'
       }
-      setMessages(prev => [...prev, errorMessage])
+      setMessages(prev => prev.filter(msg => msg.id !== uploadingMessageId).concat(errorMessage))
     }
   }
 
@@ -440,37 +399,77 @@ export default function ChatInterface() {
     setHasUnsavedChanges(false)
   }
 
-  // 添加新建聊天的处理函数
-  const handleNewChat = () => {
-    setMessages([])
-    setCurrentSessionId(null)
-    setHasUnsavedChanges(false)
-    
-    // 可以添加一个欢迎消息
-    const welcomeMessage: Message = {
-      id: crypto.randomUUID(),
-      content: '你好！我是 AI 助手，有什么我可以帮你的吗？',
-      role: 'assistant',
-      createdAt: new Date().toISOString(),
-      status: 'sent'
-    }
-    setMessages([welcomeMessage])
-  }
-
   // 添加会话变更处理函数
   const handleSessionChange = (sessionId: string) => {
-    setCurrentSessionId(sessionId);
+    setCurrentSessionId(sessionId)
+  }
+
+  // 添加停止生成的函数
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+      setIsGenerating(false)
+    }
+  }
+
+  // 修改加载最近聊天的函数
+  const loadRecentChat = async () => {
+    if (!user) return;
+
+    try {
+      const sessionsRef = collection(db, 'chatSessions');
+      const q = query(
+        sessionsRef,
+        where('userId', '==', user.uid),
+        orderBy('lastUpdated', 'desc'),
+        orderBy('__name__', 'desc'),
+        limit(1)
+      );
+      
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        // 如果没有任何历史记录，创建新聊天
+        handleNewChat();
+      } else {
+        // 加载最近的聊天
+        const sessionDoc = snapshot.docs[0];
+        setCurrentSessionId(sessionDoc.id);
+        
+        // 加载该会话的消息
+        const messagesRef = collection(db, 'chatSessions', sessionDoc.id, 'messages');
+        const messagesQuery = query(messagesRef, orderBy('timestamp', 'asc'));
+        const messagesSnap = await getDocs(messagesQuery);
+        
+        const messages = messagesSnap.docs.map(doc => ({
+          id: doc.id,
+          content: doc.data().content || '',
+          role: doc.data().role || 'user',
+          createdAt: doc.data().timestamp?.toDate()?.toISOString() || new Date().toISOString(),
+          status: 'sent' as const
+        }));
+        
+        setMessages(messages);
+        setHasUnsavedChanges(false);
+      }
+    } catch (error) {
+      console.error('加载最近聊天失败:', error);
+      setMessages([]);
+      setCurrentSessionId(null);
+    }
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-gray-950 to-black">
       <ChatHeader />
-      <div className="flex-1 w-full max-w-6xl mx-auto px-4 pt-20 pb-4 flex gap-4">
+      <div className="flex-1 w-full max-w-6xl mx-auto px-2 md:px-4 pt-16 md:pt-20 pb-4 flex gap-4">
         <button
           onClick={() => setShowHistory(!showHistory)}
-          className="fixed left-4 top-24 z-10 p-2.5 bg-black/60 rounded-xl border border-indigo-500/20 
-          text-indigo-300 hover:bg-indigo-500/10 transition-all duration-300 backdrop-blur-lg
-          shadow-lg shadow-indigo-500/10 hover:shadow-indigo-500/20"
+          className="fixed left-2 md:left-4 top-[4.5rem] md:top-24 z-30 p-2 md:p-2.5 
+            bg-black/60 rounded-xl border border-indigo-500/20 
+            text-indigo-300 hover:bg-indigo-500/10 transition-all duration-300 
+            backdrop-blur-lg shadow-lg shadow-indigo-500/10"
         >
           <svg 
             className="w-4 h-4" 
@@ -488,10 +487,12 @@ export default function ChatInterface() {
         
         <div 
           className={`
-            fixed left-0 top-0 h-full w-64
+            fixed left-0 top-0 h-full 
+            w-full md:w-64
             transform transition-all duration-300 ease-out z-20
             ${showHistory ? 'translate-x-0' : '-translate-x-full'}
-            pt-20 bg-black/80 backdrop-blur-xl
+            pt-16 md:pt-20 
+            bg-black/95 md:bg-black/80 backdrop-blur-xl
             border-r border-indigo-500/10
           `}
         >
@@ -499,43 +500,50 @@ export default function ChatInterface() {
             onSelectChat={handleSelectChat} 
             onClearHistory={handleClearHistory}
             onNewChat={handleNewChat}
-            currentSessionId={currentSessionId}
-            onSessionChange={handleSessionChange}
           />
         </div>
         
         {showHistory && (
           <div 
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-10 transition-opacity duration-300"
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-10 md:hidden"
             onClick={() => setShowHistory(false)}
           />
         )}
         
         <div className={`
-          flex-1 bg-black/40 rounded-2xl border border-indigo-500/20 
+          flex-1 bg-black/40 rounded-xl md:rounded-2xl border border-indigo-500/20 
           shadow-lg shadow-indigo-500/5
-          h-[75vh] min-h-[500px] max-h-[800px] flex flex-col overflow-hidden
+          h-[calc(100vh-4rem)] md:h-[75vh] 
+          min-h-[400px] md:min-h-[500px] 
+          max-h-[calc(100vh-4rem)] md:max-h-[800px] 
+          flex flex-col overflow-hidden
           transition-all duration-300 ease-out backdrop-blur-md
-          ${showHistory ? 'ml-64' : 'ml-0'}
+          ${showHistory ? 'ml-0 md:ml-64' : 'ml-0'}
         `}>
-          <div className="bg-black/40 p-4 border-b border-indigo-500/20 flex justify-between items-center">
+          <div className="bg-black/40 p-3 md:p-4 border-b border-indigo-500/20 
+            flex justify-between items-center">
             <h2 className="text-indigo-300 font-medium text-sm">Chat with AI</h2>
             {hasUnsavedChanges && (
               <button
                 onClick={handleSaveChat}
                 disabled={loading}
-                className={`px-3 py-1.5 text-xs ${
-                  loading 
-                    ? 'bg-purple-500/10 text-purple-300/50 cursor-not-allowed' 
-                    : 'bg-purple-500/20 text-purple-300 hover:bg-purple-500/30'
-                } rounded-lg transition-colors border border-purple-500/30`}
+                className="px-2 md:px-3 py-1 md:py-1.5 text-xs bg-purple-500/20 
+                  text-purple-300 rounded-lg hover:bg-purple-500/30 
+                  transition-colors border border-purple-500/30"
               >
-                {loading ? '保存中...' : '保存聊天记录'}
+                {loading ? '保存中...' : '保存'}
               </button>
             )}
           </div>
-          <MessageList messages={messages} />
-          <ChatInput onSendMessage={handleSendMessage} onFileSelect={handleFileSelect} />
+          <MessageList 
+            messages={messages} 
+            onStopGeneration={handleStopGeneration}
+            isGenerating={isGenerating}
+          />
+          <ChatInput 
+            onSendMessage={handleSendMessage} 
+            onFileSelect={handleFileSelect}
+          />
         </div>
       </div>
     </div>

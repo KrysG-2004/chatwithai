@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import AuthModal from './AuthModal'
 
 interface IntroPageProps {
   onGetStarted: () => void
@@ -15,10 +16,15 @@ const crossWords = {
 
 export default function IntroPage({ onGetStarted }: IntroPageProps) {
   const [showContent, setShowContent] = useState(false)
+  const [showAuth, setShowAuth] = useState(false)
 
   useEffect(() => {
     setShowContent(true)
   }, [])
+
+  const handleGetStarted = () => {
+    setShowAuth(true)  // 显示登录/注册模态框
+  }
 
   return (
     <div className="fixed inset-0 bg-black flex items-center justify-center z-50">
@@ -44,13 +50,21 @@ export default function IntroPage({ onGetStarted }: IntroPageProps) {
             支持实时对话、代码高亮、文件上传等多种功能。
           </p>
           <button
-            onClick={onGetStarted}
+            onClick={handleGetStarted}
             className="button mt-6"
           >
             开始使用
           </button>
         </div>
       </div>
+
+      {/* 登录/注册模态框 */}
+      {showAuth && (
+        <AuthModal 
+          isOpen={showAuth} 
+          onClose={() => setShowAuth(false)}
+        />
+      )}
     </div>
   )
 } 

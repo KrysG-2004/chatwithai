@@ -3,7 +3,7 @@ export interface ChatMessage {
   content: string
 }
 
-export async function sendChatMessage(messages: ChatMessage[]) {
+export async function sendChatMessage(messages: ChatMessage[], signal?: AbortSignal) {
   try {
     const response = await fetch('/api/chat', {
       method: 'POST',
@@ -11,6 +11,7 @@ export async function sendChatMessage(messages: ChatMessage[]) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ messages }),
+      signal,
     })
 
     if (!response.ok) {

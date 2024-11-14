@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import FileUpload from './FileUpload'
 
 interface ChatInputProps {
@@ -9,57 +9,67 @@ interface ChatInputProps {
 }
 
 export default function ChatInput({ onSendMessage, onFileSelect }: ChatInputProps) {
-  const [input, setInput] = useState('')
-  const [showUpload, setShowUpload] = useState(false)
+  const [message, setMessage] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setMessage(e.target.value)
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit(e)
+    }
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim()) return
-    onSendMessage(input)
-    setInput('')
-  }
-
-  const handleFileSelect = (file: File) => {
-    if (onFileSelect) {
-      onFileSelect(file)
-      setShowUpload(false)
+    if (!message.trim()) return
+    onSendMessage(message)
+    setMessage('')
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
     }
   }
 
   return (
-    <div className="border-t border-green-500/20 bg-black/20">
-      {showUpload && (
-        <div className="p-4">
-          <FileUpload onFileSelect={handleFileSelect} />
-        </div>
-      )}
-      <form onSubmit={handleSubmit} className="p-4">
-        <div className="flex items-center space-x-2">
-          <button
-            type="button"
-            onClick={() => setShowUpload(!showUpload)}
-            className="p-2 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Type your message..."
-            className="flex-1 bg-black/40 text-green-400 placeholder-green-700 rounded-lg px-4 py-2 border border-green-500/30 focus:outline-none focus:border-green-500/50"
-          />
-          <button
-            type="submit"
-            disabled={!input.trim()}
-            className="bg-green-500/20 hover:bg-green-500/30 text-green-400 px-4 py-2 rounded-lg border border-green-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            Send
-          </button>
-        </div>
-      </form>
+    <div className="border-t border-indigo-500/20 bg-black/40 p-2 sm:p-4">
+      <div className="relative flex items-center gap-2">
+        {onFileSelect && (
+          <div className="relative z-20">
+            <FileUpload onFileSelect={onFileSelect} />
+          </div>
+        )}
+
+        <textarea
+          ref={textareaRef}
+          value={message}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          placeholder="输入消息..."
+          className="flex-1 bg-black/40 text-indigo-300 rounded-xl px-3 py-2 sm:px-4 sm:py-3
+            border border-indigo-500/30 focus:border-indigo-500/50
+            focus:outline-none focus:ring-2 focus:ring-indigo-500/20
+            placeholder-indigo-500/50 text-xs sm:text-sm resize-none"
+          rows={1}
+        />
+        
+        <button
+          onClick={handleSubmit}
+          disabled={!message.trim()}
+          className="px-3 sm:px-4 py-2 sm:py-3 bg-indigo-500/20 text-indigo-300 
+            rounded-xl hover:bg-indigo-500/30 transition-colors
+            border border-indigo-500/30 text-xs sm:text-sm
+            disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          发送
+        </button>
+      </div>
     </div>
   )
 } 

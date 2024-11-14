@@ -6,7 +6,6 @@ import { collection, query, where, orderBy, getDocs, updateDoc, doc, limit, dele
 import { useAuthState } from 'react-firebase-hooks/auth'
 import { auth } from '@/lib/firebase'
 import { Message } from '../types/chat'
-import { ChatMessage, sendChatMessage } from '../utils/api-client'
 
 interface ChatHistoryProps {
   onSelectChat: (messages: Message[]) => void
@@ -32,215 +31,161 @@ export default function ChatHistory({
   }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [indexBuilding, setIndexBuilding] = useState(false)
   const [generatingSummary, setGeneratingSummary] = useState<string | null>(null)
 
-  const loadChatSessions = async () => {
-    if (!user) {
-      setLoading(false)
-      return
-    }
-
+  // 添加生成摘要的函数
+  const generateSummary = async (sessionId: string, messages: Message[]) => {
+    if (messages.length === 0) return;
+    
     try {
-      setLoading(true)
-      setError(null)
-      setIndexBuilding(false)
+      setGeneratingSummary(sessionId);
       
-      console.log('开始加载聊天历史, userId:', user.uid)
-      
-      const sessionsRef = collection(db, 'chatSessions')
-      const q = query(
-        sessionsRef,
-        where('userId', '==', user.uid),
-        orderBy('timestamp', 'desc')
-      )
-      
-      try {
-        const querySnapshot = await getDocs(q)
-        console.log('查询到的会话数量:', querySnapshot.size)
-        
-        const processedSessions = []
-        
-        for (const doc of querySnapshot.docs) {
-          try {
-            const data = doc.data()
-            console.log('会话数据:', data)
-            
-            // 如果没有摘要，获取第一条消息作为标题
-            if (!data.summary) {
-              const messagesRef = collection(db, 'chatSessions', doc.id, 'messages')
-              const messagesQuery = query(messagesRef, orderBy('timestamp'), limit(1))
-              const messagesSnap = await getDocs(messagesQuery)
-              const firstMessage = messagesSnap.docs[0]?.data()
-              
-              processedSessions.push({
-                id: doc.id,
-                title: firstMessage?.content?.slice(0, 50) + '...' || '新对话',
-                timestamp: data.timestamp?.toDate() || new Date(),
-                summary: data.summary
-              })
-            } else {
-              processedSessions.push({
-                id: doc.id,
-                title: data.title || '新对话',
-                timestamp: data.timestamp?.toDate() || new Date(),
-                summary: data.summary
-              })
+      // 构建提示词
+      const prompt = `请为以下对话生成一个简短的标题（15字以内）：\n\n${
+        messages.slice(0, 3).map(m => 
+          `${m.role === 'user' ? '用户' : 'AI'}: ${m.content.slice(0, 50)}`
+        ).join('\n')
+      }${messages.length > 3 ? '\n...(更多对话)' : ''}`;
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [{
+            role: 'user',
+            content: prompt
+          }]
+        })
+      });
+
+      if (!response.ok) throw new Error('生成摘要失败');
+
+      const reader = response.body?.getReader();
+      let summary = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.choices?.[0]?.delta?.content) {
+                  summary += parsed.choices[0].delta.content;
+                }
+              } catch (e) {
+                console.error('解析响应数据失败:', e);
+              }
             }
-          } catch (err) {
-            console.error('处理会话数据时出错:', err)
-            continue
           }
         }
-        
-        console.log('处理后的会话数据:', processedSessions)
-        setChatSessions(processedSessions)
-        
-      } catch (error: any) {
-        // 检查是否是索引构建错误
-        if (error?.message?.includes('requires an index') || 
-            error?.message?.includes('index is currently building')) {
-          console.log('索引正在构建中...')
-          setIndexBuilding(true)
-          // 尝试使用未排序的查询作为后备方案
-          const fallbackQuery = query(
-            sessionsRef,
-            where('userId', '==', user.uid)
-          )
-          const fallbackSnapshot = await getDocs(fallbackQuery)
-          const fallbackSessions = fallbackSnapshot.docs
-            .map(doc => {
-              const data = doc.data()
-              return {
-                id: doc.id,
-                title: data.title || '新对话',
-                timestamp: data.timestamp?.toDate() || new Date(),
-                summary: data.summary
-              }
-            })
-            .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-          
-          setChatSessions(fallbackSessions)
-        } else {
-          throw error
-        }
       }
-      
-    } catch (error) {
-      console.error('加载聊天历史失败:', error)
-      setError(error instanceof Error ? error.message : '加载聊天历史失败')
-    } finally {
-      setLoading(false)
-    }
-  }
 
-  const generateSummary = async (sessionId: string, messages: Message[]) => {
-    try {
-      setGeneratingSummary(sessionId)
-      
-      // 优化提示词，让 AI 更好地理解对话内容和生成更准确的摘要
-      const prompt = `请分析以下对话内容，并生成一个简短的标题（15字以内）。标题应该：
-1. 准确反映对话的主要主题
-2. 包含具体的关键词，而不是泛泛而谈
-3. 如果是编程相关，请标明具体的技术或问题
-4. 如果是文件分析，请标明文件类型和主题
-
-对话内容：
-${messages.map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content.slice(0, 100)}`).join('\n')}
-${messages.length > 3 ? '\n[对话继续...]' : ''}
-
-请直接返回标题，不要包含任何其他内容。`
-      
-      const apiMessages = [{
-        role: 'user' as const,
-        content: prompt
-      }]
-
-      const stream = await sendChatMessage(apiMessages)
-      let summary = ''
-      
-      for await (const chunk of stream) {
-        if (chunk.choices?.[0]?.delta?.content) {
-          summary += chunk.choices[0].delta.content
-        }
-      }
-      
       // 清理和格式化摘要
       summary = summary
         .replace(/^["']*|["']*$/g, '') // 移除引号
         .replace(/标题[:：]/g, '') // 移除可能的"标题："前缀
-        .trim()
-      
+        .trim();
+
       // 如果摘要为空或太长，使用默认值
       if (!summary || summary.length > 15) {
-        summary = messages[0]?.content.slice(0, 15) + '...'
+        summary = messages[0]?.content.slice(0, 15) + '...';
       }
-      
-      // 更新会话摘要
-      const sessionRef = doc(db, 'chatSessions', sessionId)
-      await updateDoc(sessionRef, { 
-        summary,
-        lastUpdated: serverTimestamp() // 添加更新时间
-      })
-      
-      // 更新本地状态
-      setChatSessions(prev => prev.map(session => 
-        session.id === sessionId ? { ...session, summary } : session
-      ))
-      
-    } catch (error) {
-      console.error('生成摘要失败:', error)
-      // 设置一个后备的标题
-      const fallbackTitle = messages[0]?.content.slice(0, 15) + '...'
-      
-      try {
-        const sessionRef = doc(db, 'chatSessions', sessionId)
-        await updateDoc(sessionRef, { 
-          summary: fallbackTitle,
-          lastUpdated: serverTimestamp()
-        })
-        
-        setChatSessions(prev => prev.map(session => 
-          session.id === sessionId ? { ...session, summary: fallbackTitle } : session
-        ))
-      } catch (err) {
-        console.error('设置后备标题失败:', err)
-      }
-    } finally {
-      setGeneratingSummary(null)
-    }
-  }
 
-  const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation() // 阻止触发点击事件
-    
-    if (!window.confirm('确定要删除这个会话吗？')) return
-    
-    try {
-      // 删除所有消息
-      const messagesRef = collection(db, 'chatSessions', sessionId, 'messages')
-      const messagesSnap = await getDocs(messagesRef)
-      for (const doc of messagesSnap.docs) {
-        await deleteDoc(doc.ref)
-      }
-      
-      // 删除会话
-      await deleteDoc(doc(db, 'chatSessions', sessionId))
-      
-      // 更新本地状态
-      setChatSessions(prev => prev.filter(session => session.id !== sessionId))
-      
+      // 更新会话摘要
+      const sessionRef = doc(db, 'chatSessions', sessionId);
+      await updateDoc(sessionRef, {
+        summary,
+        lastUpdated: serverTimestamp()
+      });
+
     } catch (error) {
-      console.error('删除会话失败:', error)
+      console.error('生成摘要失败:', error);
+    } finally {
+      setGeneratingSummary(null);
     }
-  }
+  };
+
+  // 修改实时监听逻辑
+  useEffect(() => {
+    if (!user) {
+      setChatSessions([])
+      setLoading(false)
+      return
+    }
+
+    const sessionsRef = collection(db, 'chatSessions')
+    const q = query(
+      sessionsRef,
+      where('userId', '==', user.uid),
+      orderBy('lastUpdated', 'desc'),
+      orderBy('__name__', 'desc')
+    )
+
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const sessions = await Promise.all(snapshot.docs.map(async doc => {
+        const data = doc.data();
+        
+        // 如果没有摘要，生成一个
+        if (!data.summary) {
+          const messagesRef = collection(db, 'chatSessions', doc.id, 'messages');
+          const messagesSnap = await getDocs(query(messagesRef, orderBy('timestamp')));
+          const messages = messagesSnap.docs.map(msgDoc => ({
+            id: msgDoc.id,
+            content: msgDoc.data().content || '',
+            role: msgDoc.data().role || 'user',
+            createdAt: msgDoc.data().timestamp?.toDate()?.toISOString() || new Date().toISOString(),
+            status: 'sent' as const
+          }));
+          
+          if (messages.length > 0) {
+            generateSummary(doc.id, messages);
+          }
+        }
+
+        return {
+          id: doc.id,
+          title: data.title || '新对话',
+          timestamp: data.timestamp?.toDate() || new Date(),
+          summary: data.summary
+        };
+      }));
+
+      setChatSessions(sessions);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const loadChatMessages = async (sessionId: string) => {
     try {
       const messagesRef = collection(db, 'chatSessions', sessionId, 'messages')
       const q = query(messagesRef, orderBy('timestamp'))
       
-      // 使用 onSnapshot 实时监听消息变化
+      // 先获取一次所有消息
+      const snapshot = await getDocs(q)
+      const initialMessages = snapshot.docs.map(doc => ({
+        id: doc.id,
+        content: doc.data().content || '',
+        role: doc.data().role || 'user',
+        createdAt: doc.data().timestamp?.toDate()?.toISOString() || new Date().toISOString(),
+        status: 'sent' as const
+      }))
+      
+      // 立即更新消息列表
+      onSelectChat(initialMessages)
+      
+      // 然后设置实时监听
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const messages = snapshot.docs.map(doc => ({
           id: doc.id,
@@ -250,10 +195,18 @@ ${messages.length > 3 ? '\n[对话继续...]' : ''}
           status: 'sent' as const
         }))
         
-        onSelectChat(messages)
+        // 只有当消息数量或内容发生变化时才更新
+        const hasChanges = messages.length !== initialMessages.length ||
+          messages.some((msg, i) => msg.content !== initialMessages[i]?.content)
+        
+        if (hasChanges) {
+          onSelectChat(messages)
+        }
+      }, (error) => {
+        console.error('监听消息变化失败:', error)
       })
 
-      // 保存取消订阅函数
+      // 返回取消订阅函数
       return () => unsubscribe()
     } catch (error) {
       console.error('加载聊天消息失败:', error)
@@ -261,29 +214,64 @@ ${messages.length > 3 ? '\n[对话继续...]' : ''}
     }
   }
 
-  // 修改一键删除所有历史记录功能
+  const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    
+    if (!window.confirm('确定要删除这个会话吗？')) return
+    
+    try {
+      setLoading(true)
+      
+      // 删除会话中的所有消息
+      const messagesRef = collection(db, 'chatSessions', sessionId, 'messages')
+      const messagesSnap = await getDocs(messagesRef)
+      const deletePromises = messagesSnap.docs.map(doc => deleteDoc(doc.ref))
+      await Promise.all(deletePromises)
+      
+      // 删除会话本身
+      await deleteDoc(doc(db, 'chatSessions', sessionId))
+      
+      // 如果删除的是当前会话，清空当前消息
+      if (currentSessionId === sessionId) {
+        onClearHistory?.()
+      }
+      
+      // 从本地状态中移除该会话
+      setChatSessions(prev => prev.filter(session => session.id !== sessionId))
+      
+    } catch (error) {
+      console.error('删除会话失败:', error)
+      setError('删除失败，请重试')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleDeleteAllSessions = async () => {
     if (!window.confirm('确定要删除所有聊天记录吗？此操作不可恢复！')) return
     
     try {
       setLoading(true)
       
-      for (const session of chatSessions) {
-        // 删除所有消息
-        const messagesRef = collection(db, 'chatSessions', session.id, 'messages')
+      // 获取所有会话
+      const sessionsRef = collection(db, 'chatSessions')
+      const q = query(sessionsRef, where('userId', '==', user?.uid))
+      const snapshot = await getDocs(q)
+      
+      // 批量删除所有会话及其消息
+      for (const doc of snapshot.docs) {
+        // 先删除会话中的所有消息
+        const messagesRef = collection(db, 'chatSessions', doc.id, 'messages')
         const messagesSnap = await getDocs(messagesRef)
-        for (const doc of messagesSnap.docs) {
-          await deleteDoc(doc.ref)
-        }
+        const deletePromises = messagesSnap.docs.map(msgDoc => deleteDoc(msgDoc.ref))
+        await Promise.all(deletePromises)
         
-        // 删除会话
-        await deleteDoc(doc(db, 'chatSessions', session.id))
+        // 然后删除会话本身
+        await deleteDoc(doc.ref)
       }
       
-      // 清空本地状态
+      // 清空当前状态
       setChatSessions([])
-      
-      // 调用回调函数清空当前消息
       onClearHistory?.()
       
     } catch (error) {
@@ -293,41 +281,6 @@ ${messages.length > 3 ? '\n[对话继续...]' : ''}
       setLoading(false)
     }
   }
-
-  // 使用 useEffect 监听 user 变化
-  useEffect(() => {
-    console.log('用户状态变化:', user?.uid) // 调试日志
-    if (user) {
-      loadChatSessions()
-    } else {
-      setChatSessions([])
-      setLoading(false)
-    }
-  }, [user])
-
-  // 添加实时更新功能
-  useEffect(() => {
-    if (!user) return;
-
-    const sessionsRef = collection(db, 'chatSessions');
-    const q = query(
-      sessionsRef,
-      where('userId', '==', user.uid),
-      orderBy('timestamp', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const updatedSessions = snapshot.docs.map(doc => ({
-        id: doc.id,
-        title: doc.data().title || '新对话',
-        timestamp: doc.data().timestamp?.toDate() || new Date(),
-        summary: doc.data().summary
-      }));
-      setChatSessions(updatedSessions);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
 
   return (
     <div className="bg-black/20 m-4 p-4 rounded-xl border border-indigo-500/20 backdrop-blur-sm
@@ -359,12 +312,6 @@ ${messages.length > 3 ? '\n[对话继续...]' : ''}
       ) : error ? (
         <div className="text-red-400/80 text-xs">
           <div>加载失败: {error}</div>
-          <button 
-            onClick={loadChatSessions}
-            className="mt-2 text-indigo-300 hover:text-indigo-200 underline"
-          >
-            重试
-          </button>
         </div>
       ) : chatSessions.length === 0 ? (
         <div className="text-indigo-300/50 text-xs">暂无聊天记录</div>
@@ -379,8 +326,8 @@ ${messages.length > 3 ? '\n[对话继续...]' : ''}
             >
               <button
                 onClick={() => {
-                  loadChatMessages(session.id);
-                  onSessionChange?.(session.id);
+                  loadChatMessages(session.id)
+                  onSessionChange?.(session.id)
                 }}
                 className="w-full text-left p-2.5 hover:bg-indigo-500/10 rounded-lg 
                   transition-all duration-200 text-indigo-300 border border-transparent
