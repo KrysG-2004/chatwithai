@@ -6,15 +6,10 @@ import { useCredits } from '@/app/hooks/useCredits'
 import { motion } from 'framer-motion'
 import { auth } from '@/lib/firebase'
 import { useAuthState } from 'react-firebase-hooks/auth'
-import { loadStripe } from '@stripe/stripe-js'
-
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!)
 
 export default function PricingPage() {
   const [user] = useAuthState(auth)
   const router = useRouter()
-  const { addCredits } = useCredits()
-  const [loading, setLoading] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<number | null>(null)
   const [processing, setProcessing] = useState<number | null>(null)
 
@@ -23,7 +18,6 @@ export default function PricingPage() {
       name: '基础套餐',
       credits: 100,
       price: 10,
-      priceId: 'price_xxx',
       features: [
         '基础AI对话功能',
         '文本分析能力',
@@ -39,7 +33,6 @@ export default function PricingPage() {
       name: '专业套餐',
       credits: 500,
       price: 45,
-      priceId: 'price_yyy',
       features: [
         '高级AI对话功能',
         '深度文本分析',
@@ -57,7 +50,6 @@ export default function PricingPage() {
       name: '企业套餐',
       credits: 1200,
       price: 99,
-      priceId: 'price_zzz',
       features: [
         '企业级AI对话',
         'API集成支持',
@@ -79,42 +71,12 @@ export default function PricingPage() {
       return
     }
 
-    try {
-      setProcessing(plan.credits)
-      
-      // 创建支付会话
-      const response = await fetch('/api/create-checkout-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          priceId: plan.priceId,
-          credits: plan.credits,
-          userId: user.uid
-        }),
-      })
-
-      const { sessionId } = await response.json()
-      
-      // 重定向到 Stripe 支付页面
-      const stripe = await stripePromise
-      const { error } = await stripe!.redirectToCheckout({ sessionId })
-      
-      if (error) {
-        throw error
-      }
-    } catch (error) {
-      console.error('购买失败:', error)
-      alert('我们尚未接入支付系统，请稍后再试')
-    } finally {
-      setProcessing(null)
-    }
+    // 暂时只显示提示信息
+    alert('支付功能正在开发中，敬请期待！')
   }
 
   // 修改导航逻辑
   useEffect(() => {
-    // 如果用户已登录，直接添加返回路径
     if (user) {
       window.history.pushState({ from: 'pricing' }, '', '/pricing')
     }
