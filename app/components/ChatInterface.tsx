@@ -25,15 +25,14 @@ const useHandleSendMessage = (
   setMessages: SetMessagesAction,
   setCurrentSessionId: (id: string | null) => void,
   setIsGenerating: (value: boolean) => void,
-  abortControllerRef: { current: AbortController | null }
+  abortControllerRef: { current: AbortController | null },
+  checkCredit: () => Promise<boolean>
 ) => {
-  const { useCredit } = useCredits();
-  
   return async (content: string) => {
     if (!user) return;
     
     // 检查积分
-    const canProceed = await useCredit();
+    const canProceed = await checkCredit();
     if (!canProceed) return;
 
     if (!content.trim()) return;
@@ -111,7 +110,7 @@ const useHandleSendMessage = (
           }
         }
 
-        // 保存完整的 AI 回复到���据库
+        // 保存完整的 AI 回复到据库
         await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
           content: fullContent,
           role: 'assistant',
@@ -271,7 +270,8 @@ export default function ChatInterface() {
     setMessages,
     setCurrentSessionId,
     setIsGenerating,
-    abortControllerRef
+    abortControllerRef,
+    useCredit
   );
 
   const handleSelectChat = (historicalMessages: Message[]) => {
