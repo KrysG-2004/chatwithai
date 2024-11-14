@@ -349,7 +349,7 @@ export default function ChatInterface() {
     }
   };
 
-  const handleFileSelect = async (file: File) => {
+  const handleFileSelect = useCallback(async (file: File) => {
     if (!user) return;
     
     // 检查积分（需要2个积分：1个用于文件上传，1个用于AI分析）
@@ -497,7 +497,7 @@ export default function ChatInterface() {
         console.error('文件处理失败:', error)
         const errorMessage: Message = {
           id: crypto.randomUUID(),
-          content: `文件处理失败: ${error instanceof Error ? error.message : '��知错误'}`,
+          content: `文件处理失败: ${error instanceof Error ? error.message : '未知错误'}`,
           role: 'system',
           createdAt: new Date().toISOString(),
           status: 'error'
@@ -516,7 +516,7 @@ export default function ChatInterface() {
       }
       setMessages(prev => prev.filter(msg => msg.id !== uploadingMessageId).concat(errorMessage))
     }
-  }
+  }, [user, useCredit, setMessages]);
 
   // 添加清空当前消息的处理函数
   const handleClearHistory = () => {

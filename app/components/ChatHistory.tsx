@@ -40,12 +40,43 @@ export default function ChatHistory({
     try {
       setGeneratingSummary(sessionId);
       
+      // 找到第一条用户消息
+      const firstUserMessage = messages.find(m => m.role === 'user');
+      if (!firstUserMessage) return;
+
+      // 如果是简单的问候语，直接使用特定标题
+      const greetings = ['你好', '您好', 'hello', 'hi', '嗨', '在吗'];
+      if (greetings.some(greeting => 
+        firstUserMessage.content.toLowerCase().trim() === greeting.toLowerCase()
+      )) {
+        const summary = '新的对话';
+        // 更新会话摘要
+        const sessionRef = doc(db, 'chatSessions', sessionId);
+        await updateDoc(sessionRef, {
+          summary,
+          lastUpdated: serverTimestamp()
+        });
+        return;
+      }
+
+      // 找到第一条用户消息后的两条消息
+      const messageIndex = messages.indexOf(firstUserMessage);
+      const relevantMessages = messages.slice(messageIndex, messageIndex + 3);
+      
       // 构建提示词
-      const prompt = `请为以下对话生成一个简短的标题（15字以内）：\n\n${
-        messages.slice(0, 3).map(m => 
-          `${m.role === 'user' ? '用户' : 'AI'}: ${m.content.slice(0, 50)}`
-        ).join('\n')
-      }${messages.length > 3 ? '\n...(更多对话)' : ''}`;
+      const prompt = `请为以下对话生成一个简短的标题（15字以内）。要求：
+1. 标题必须严格基于用户的实际问题内容
+2. 不要使用"AI助手"、"对话"、"聊天"等词
+3. 如果是文件分析，要说明是什么类型的文件分析
+4. 如果是编程相关，必须用户实际问了编程问题才能用编程相关标题
+5. 如果是简单问候或简短对话，使用"新的对话"作为标题
+
+对话内容：
+${relevantMessages.map(m => 
+  `${m.role === 'user' ? '用户' : 'AI'}: ${m.content.slice(0, 150)}`
+).join('\n')}
+
+注意：标题必须真实反映用户的问题，不要过度推测或泛化。`;
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -94,11 +125,39 @@ export default function ChatHistory({
       summary = summary
         .replace(/^["']*|["']*$/g, '') // 移除引号
         .replace(/标题[:：]/g, '') // 移除可能的"标题："前缀
+        .replace(/[【】\[\]]/g, '') // 移除方括号
         .trim();
 
-      // 如果摘要为空或太长，使用默认值
+      // 如果摘要为空或太长，使用智能提取的默认值
       if (!summary || summary.length > 15) {
-        summary = messages[0]?.content.slice(0, 15) + '...';
+        const content = firstUserMessage.content.toLowerCase();
+        
+        if (content.includes('上传了文件')) {
+          // 如果是文件分析，提取文件名和类型
+          const match = content.match(/上传了文件：(.+?)$/);
+          const fileName = match ? match[1] : '';
+          const fileType = fileName.split('.').pop()?.toUpperCase() || '';
+          summary = `${fileType}文件分析：${fileName.slice(0, 10)}`;
+        } else if (content.length <= 10) {
+          // 如果是短消息，直接使用"新的对话"
+          summary = '新的对话';
+        } else {
+          // 分析用户消息的内容类型，但要更严格的匹配
+          if (content.includes('javascript') || content.includes('js')) {
+            summary = content.includes('问题') ? 'JavaScript问题解答' : content.slice(0, 15);
+          } else if (content.includes('react')) {
+            summary = content.includes('问题') ? 'React开发问题' : content.slice(0, 15);
+          } else if (content.includes('python')) {
+            summary = content.includes('问题') ? 'Python编程指导' : content.slice(0, 15);
+          } else if (content.includes('sql') || content.includes('数据库')) {
+            summary = content.includes('问题') ? '数据库问题解答' : content.slice(0, 15);
+          } else if (content.includes('css') || content.includes('样式')) {
+            summary = content.includes('问题') ? 'CSS样式问题' : content.slice(0, 15);
+          } else {
+            // 直接使用用户消息的前15个字符
+            summary = content.slice(0, 15) + (content.length > 15 ? '...' : '');
+          }
+        }
       }
 
       // 更新会话摘要
