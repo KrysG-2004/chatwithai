@@ -4,20 +4,15 @@ const nextConfig = {
   async headers() {
     return [
       {
-        // 上传文件的缓存和安全策略
-        source: '/uploads/:path*',
+        source: '/:path*',
         headers: [
           {
-            key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin-allow-popups'
           },
           {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
-          {
-            key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self'; object-src 'none';",
+            key: 'Cross-Origin-Embedder-Policy',
+            value: 'require-corp'
           }
         ],
       },
@@ -28,6 +23,20 @@ const nextConfig = {
           {
             key: 'Cache-Control',
             value: 'no-store, must-revalidate',
+          }
+        ],
+      },
+      {
+        // 上传文件的缓存和安全策略
+        source: '/uploads/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
           }
         ],
       }

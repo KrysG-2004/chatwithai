@@ -93,53 +93,92 @@ const useHandleSendMessage = (
         }));
 
         abortControllerRef.current = new AbortController();
-        const stream = await sendChatMessage(apiMessages, abortControllerRef.current.signal);
+        let retryCount = 0;
+        const maxRetries = 3;
         let fullContent = '';
         
-        for await (const chunk of stream) {
-          if (chunk.choices?.[0]?.delta?.content) {
-            const content = chunk.choices[0].delta.content;
-            fullContent += content;
-            setMessages((prev: Message[]) => 
-              prev.map((msg: Message) => 
-                msg.id === aiMessage.id 
-                  ? { ...msg, content: fullContent }
-                  : msg
-              )
-            );
+        const processStream = async () => {
+          try {
+            const stream = await sendChatMessage(apiMessages, abortControllerRef.current?.signal);
+            
+            for await (const chunk of stream) {
+              if (abortControllerRef.current?.signal.aborted) {
+                throw new Error('Stream was aborted');
+              }
+
+              if (chunk.choices?.[0]?.delta?.content) {
+                const content = chunk.choices[0].delta.content;
+                fullContent += content;
+                setMessages((prev: Message[]) => 
+                  prev.map((msg: Message) => 
+                    msg.id === aiMessage.id 
+                      ? { ...msg, content: fullContent }
+                      : msg
+                  )
+                );
+              }
+            }
+
+            // 成功完成流式处理
+            return true;
+          } catch (error) {
+            if (error instanceof Error && error.message === 'Stream was aborted') {
+              throw error; // 如果是手动中止，直接抛出错误
+            }
+            
+            console.error('Stream processing error:', error);
+            if (retryCount < maxRetries) {
+              retryCount++;
+              console.log(`Retrying stream processing (${retryCount}/${maxRetries})...`);
+              await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // 指数退避
+              return processStream(); // 递归重试
+            }
+            throw error;
           }
+        };
+
+        try {
+          await processStream();
+
+          // 保存完整的 AI 回复到数据库
+          const messageRef = await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
+            content: fullContent,
+            role: 'assistant',
+            timestamp: serverTimestamp(),
+            status: 'sent'
+          });
+
+          // 更新会话的最后更新时间
+          await updateDoc(doc(db, 'chatSessions', sessionId), {
+            lastUpdated: serverTimestamp()
+          });
+
+          setMessages((prev: Message[]) => 
+            prev.map((msg: Message) => 
+              msg.id === aiMessage.id 
+                ? { ...msg, id: messageRef.id, content: fullContent, status: 'sent' }
+                : msg
+            )
+          );
+
+        } catch (error) {
+          if (error instanceof Error && error.message === 'Stream was aborted') {
+            console.log('Stream was manually aborted');
+            return;
+          }
+
+          console.error('AI 回复失败:', error);
+          setMessages((prev: Message[]) => 
+            prev.map((msg: Message) => 
+              msg.id === aiMessage.id 
+                ? { ...msg, status: 'error' }
+                : msg
+            )
+          );
         }
 
-        // 保存完整的 AI 回复到据库
-        await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
-          content: fullContent,
-          role: 'assistant',
-          timestamp: serverTimestamp(),
-          status: 'sent'
-        });
-
-        // 更新会话的最后更新时间
-        await updateDoc(doc(db, 'chatSessions', sessionId), {
-          lastUpdated: serverTimestamp()
-        });
-
-        setMessages((prev: Message[]) => 
-          prev.map((msg: Message) => 
-            msg.id === aiMessage.id 
-              ? { ...msg, content: fullContent, status: 'sent' }
-              : msg
-          )
-        );
-
       } catch (error) {
-        console.error('AI 回复失败:', error);
-        setMessages((prev: Message[]) => 
-          prev.map((msg: Message) => 
-            msg.id === aiMessage.id 
-              ? { ...msg, status: 'error' }
-              : msg
-          )
-        );
+        console.error('保存消息失败:', error);
       } finally {
         setIsGenerating(false);
         abortControllerRef.current = null;
