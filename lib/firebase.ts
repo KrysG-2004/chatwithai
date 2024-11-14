@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
+import { getAuth, RecaptchaVerifier } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 import { getStorage } from 'firebase/storage'
 
@@ -13,6 +13,12 @@ const firebaseConfig = {
 }
 
 let app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0]
+
+// 在开发环境中使用调试令牌
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+  (window as any).FIREBASE_APPCHECK_DEBUG_TOKEN = 'e852deff-b4e8-4404-99b3-083f358d683d'
+}
+
 export const auth = getAuth(app)
 export const db = getFirestore(app)
 export const storage = getStorage(app) 

@@ -7,11 +7,13 @@ import { useAuthState } from 'react-firebase-hooks/auth'
 import AboutModal from './AboutModal'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence } from 'framer-motion'
+import { useCredits } from '../hooks/useCredits'
 
 export default function ChatHeader() {
   const [showAbout, setShowAbout] = useState(false)
   const [user] = useAuthState(auth)
   const router = useRouter()
+  const { credits } = useCredits()
 
   const handleNavigation = (path: string) => {
     if (path === '/') {
@@ -84,6 +86,18 @@ export default function ChatHeader() {
         <div className="flex items-center">
           {user && (
             <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-2">
+                <span className="text-indigo-300/70 font-mono text-sm">
+                  积分: {credits ?? '加载中...'}
+                </span>
+                <Link
+                  href="/pricing"
+                  className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded 
+                    hover:bg-indigo-500/30 transition-colors border border-indigo-500/30"
+                >
+                  充值
+                </Link>
+              </div>
               <span className="text-indigo-300/70 font-mono text-sm truncate max-w-[200px]">
                 {user.email}
               </span>

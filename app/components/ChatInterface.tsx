@@ -33,7 +33,18 @@ const useHandleSendMessage = (
     
     // 检查积分
     const canProceed = await checkCredit();
-    if (!canProceed) return;
+    if (!canProceed) {
+      // 如果积分不足，添加一条系统消息提示用户
+      const systemMessage: Message = {
+        id: crypto.randomUUID(),
+        content: '您的积分不足，请前往充值页面购买积分。',
+        role: 'system',
+        createdAt: new Date().toISOString(),
+        status: 'sent'
+      };
+      setMessages(prev => [...prev, systemMessage]);
+      return;
+    }
 
     if (!content.trim()) return;
 
@@ -93,92 +104,53 @@ const useHandleSendMessage = (
         }));
 
         abortControllerRef.current = new AbortController();
-        let retryCount = 0;
-        const maxRetries = 3;
+        const stream = await sendChatMessage(apiMessages, abortControllerRef.current.signal);
         let fullContent = '';
         
-        const processStream = async () => {
-          try {
-            const stream = await sendChatMessage(apiMessages, abortControllerRef.current?.signal);
-            
-            for await (const chunk of stream) {
-              if (abortControllerRef.current?.signal.aborted) {
-                throw new Error('Stream was aborted');
-              }
-
-              if (chunk.choices?.[0]?.delta?.content) {
-                const content = chunk.choices[0].delta.content;
-                fullContent += content;
-                setMessages((prev: Message[]) => 
-                  prev.map((msg: Message) => 
-                    msg.id === aiMessage.id 
-                      ? { ...msg, content: fullContent }
-                      : msg
-                  )
-                );
-              }
-            }
-
-            // 成功完成流式处理
-            return true;
-          } catch (error) {
-            if (error instanceof Error && error.message === 'Stream was aborted') {
-              throw error; // 如果是手动中止，直接抛出错误
-            }
-            
-            console.error('Stream processing error:', error);
-            if (retryCount < maxRetries) {
-              retryCount++;
-              console.log(`Retrying stream processing (${retryCount}/${maxRetries})...`);
-              await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // 指数退避
-              return processStream(); // 递归重试
-            }
-            throw error;
+        for await (const chunk of stream) {
+          if (chunk.choices?.[0]?.delta?.content) {
+            const content = chunk.choices[0].delta.content;
+            fullContent += content;
+            setMessages((prev: Message[]) => 
+              prev.map((msg: Message) => 
+                msg.id === aiMessage.id 
+                  ? { ...msg, content: fullContent }
+                  : msg
+              )
+            );
           }
-        };
-
-        try {
-          await processStream();
-
-          // 保存完整的 AI 回复到数据库
-          const messageRef = await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
-            content: fullContent,
-            role: 'assistant',
-            timestamp: serverTimestamp(),
-            status: 'sent'
-          });
-
-          // 更新会话的最后更新时间
-          await updateDoc(doc(db, 'chatSessions', sessionId), {
-            lastUpdated: serverTimestamp()
-          });
-
-          setMessages((prev: Message[]) => 
-            prev.map((msg: Message) => 
-              msg.id === aiMessage.id 
-                ? { ...msg, id: messageRef.id, content: fullContent, status: 'sent' }
-                : msg
-            )
-          );
-
-        } catch (error) {
-          if (error instanceof Error && error.message === 'Stream was aborted') {
-            console.log('Stream was manually aborted');
-            return;
-          }
-
-          console.error('AI 回复失败:', error);
-          setMessages((prev: Message[]) => 
-            prev.map((msg: Message) => 
-              msg.id === aiMessage.id 
-                ? { ...msg, status: 'error' }
-                : msg
-            )
-          );
         }
 
+        // 保存完整的 AI 回复到数据库
+        await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
+          content: fullContent,
+          role: 'assistant',
+          timestamp: serverTimestamp(),
+          status: 'sent'
+        });
+
+        // 更新会话的最后更新时间
+        await updateDoc(doc(db, 'chatSessions', sessionId), {
+          lastUpdated: serverTimestamp()
+        });
+
+        setMessages((prev: Message[]) => 
+          prev.map((msg: Message) => 
+            msg.id === aiMessage.id 
+              ? { ...msg, content: fullContent, status: 'sent' }
+              : msg
+          )
+        );
+
       } catch (error) {
-        console.error('保存消息失败:', error);
+        console.error('AI 回复失败:', error);
+        setMessages((prev: Message[]) => 
+          prev.map((msg: Message) => 
+            msg.id === aiMessage.id 
+              ? { ...msg, status: 'error' }
+              : msg
+          )
+        );
       } finally {
         setIsGenerating(false);
         abortControllerRef.current = null;
@@ -380,6 +352,22 @@ export default function ChatInterface() {
   const handleFileSelect = async (file: File) => {
     if (!user) return;
     
+    // 检查积分（需要2个积分：1个用于文件上传，1个用于AI分析）
+    const canProceed = await useCredit();
+    const canAnalyze = await useCredit();
+    if (!canProceed || !canAnalyze) {
+      // 如果积分不足，添加一条系统消息提示用户
+      const systemMessage: Message = {
+        id: crypto.randomUUID(),
+        content: '上传和分析文件需要2个积分。您的积分不足，请前往充值页面购买积分。',
+        role: 'system',
+        createdAt: new Date().toISOString(),
+        status: 'sent'
+      };
+      setMessages(prev => [...prev, systemMessage]);
+      return;
+    }
+    
     const uploadingMessageId = crypto.randomUUID()
     const uploadingMessage: Message = {
       id: uploadingMessageId,
@@ -445,41 +433,76 @@ export default function ChatInterface() {
           }
         ]
 
-        const stream = await sendChatMessage(apiMessages)
-        let fullContent = ''
-        
-        for await (const chunk of stream) {
-          if (chunk.choices?.[0]?.delta?.content) {
-            const content = chunk.choices[0].delta.content
-            fullContent += content
-            setMessages(prev => 
-              prev.map(msg => 
-                msg.id === aiMessage.id 
-                  ? { ...msg, content: fullContent }
-                  : msg
-              )
-            )
+        // 创建新的 AbortController
+        abortControllerRef.current = new AbortController();
+        setIsGenerating(true);
+
+        try {
+          const stream = await sendChatMessage(apiMessages, abortControllerRef.current.signal)
+          let fullContent = ''
+          let wasAborted = false
+          
+          try {
+            for await (const chunk of stream) {
+              if (chunk.choices?.[0]?.delta?.content) {
+                const content = chunk.choices[0].delta.content
+                fullContent += content
+                setMessages(prev => 
+                  prev.map(msg => 
+                    msg.id === aiMessage.id 
+                      ? { ...msg, content: fullContent }
+                      : msg
+                  )
+                )
+              }
+            }
+          } catch (error) {
+            // 检查是否是用户手动停止
+            if (error instanceof Error && error.name === 'AbortError') {
+              wasAborted = true
+              // 不抛出错误，继续执行后续代码
+            } else {
+              throw error // 其他错误继续抛出
+            }
           }
+
+          // 更新AI消息状态
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === aiMessage.id 
+                ? { 
+                    ...msg, 
+                    content: wasAborted ? fullContent + '\n\n[已停止生成]' : fullContent,
+                    status: 'sent'
+                  }
+                : msg
+            )
+          )
+
+        } catch (error) {
+          console.error('AI 分析失败:', error)
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === aiMessage.id 
+                ? { ...msg, content: '分析文件内容时出错', status: 'error' }
+                : msg
+            )
+          )
+        } finally {
+          setIsGenerating(false);
+          abortControllerRef.current = null;
         }
 
-        // 更新AI消息状态
-        setMessages(prev => 
-          prev.map(msg => 
-            msg.id === aiMessage.id 
-              ? { ...msg, content: fullContent, status: 'sent' }
-              : msg
-          )
-        )
-
       } catch (error) {
-        console.error('AI 分析败:', error)
-        setMessages(prev => 
-          prev.map(msg => 
-            msg.id === aiMessage.id 
-              ? { ...msg, content: '分析文件内容时出错', status: 'error' }
-              : msg
-          )
-        )
+        console.error('文件处理失败:', error)
+        const errorMessage: Message = {
+          id: crypto.randomUUID(),
+          content: `文件处理失败: ${error instanceof Error ? error.message : '��知错误'}`,
+          role: 'system',
+          createdAt: new Date().toISOString(),
+          status: 'error'
+        }
+        setMessages(prev => prev.filter(msg => msg.id !== uploadingMessageId).concat(errorMessage))
       }
 
     } catch (error) {
