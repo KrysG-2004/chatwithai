@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword,
   signInWithPopup,
-  GoogleAuthProvider,
+  GoogleAuthProvider
 } from 'firebase/auth'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -20,10 +20,12 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setIsLoading(true)
 
     try {
       if (isLogin) {
@@ -34,16 +36,33 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
       onClose()
     } catch (error) {
       setError(error instanceof Error ? error.message : '认证失败')
+    } finally {
+      setIsLoading(false)
     }
   }
 
   const handleGoogleSignIn = async () => {
+    setError('')
+    setIsLoading(true)
+
     try {
       const provider = new GoogleAuthProvider()
       await signInWithPopup(auth, provider)
       onClose()
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Google 登录失败')
+      if (error instanceof Error) {
+        if (error.code === 'auth/popup-blocked') {
+          setError('请允许弹窗以继续登录')
+        } else if (error.code === 'auth/popup-closed-by-user') {
+          setError('登录已取消')
+        } else {
+          setError(error.message)
+        }
+      } else {
+        setError('Google 登录失败')
+      }
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -99,11 +118,13 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               type="submit"
+              disabled={isLoading}
               className="w-full py-3 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/30 
                 hover:bg-purple-500/30 transition-all duration-300 font-mono
-                shadow-lg shadow-purple-500/10 hover:shadow-purple-500/20"
+                shadow-lg shadow-purple-500/10 hover:shadow-purple-500/20
+                disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLogin ? '登录' : '注册'}
+              {isLoading ? '处理中...' : (isLogin ? '登录' : '注册')}
             </motion.button>
           </form>
 
@@ -117,14 +138,16 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={handleGoogleSignIn}
+            disabled={isLoading}
             className="w-full py-3 rounded-xl bg-white/5 text-purple-300 border border-purple-500/30 
               hover:bg-white/10 transition-all duration-300 flex items-center justify-center gap-2 font-mono
-              shadow-lg shadow-purple-500/10 hover:shadow-purple-500/20"
+              shadow-lg shadow-purple-500/10 hover:shadow-purple-500/20
+              disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path fill="currentColor" d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z"/>
             </svg>
-            使用 Google 账号登录
+            {isLoading ? '处理中...' : '使用 Google 账号登录'}
           </motion.button>
 
           <div className="mt-6 text-center">
@@ -145,26 +168,6 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               {error}
             </motion.p>
           )}
-
-          {[...Array(5)].map((_, i) => (
-            <motion.div
-              key={i}
-              className="absolute w-1 h-1 bg-purple-400/30 rounded-full"
-              style={{
-                top: `${Math.random() * 100}%`,
-                left: `${Math.random() * 100}%`,
-              }}
-              animate={{
-                y: [0, -10, 0],
-                opacity: [0.3, 0.6, 0.3],
-              }}
-              transition={{
-                duration: 2 + Math.random() * 2,
-                repeat: Infinity,
-                delay: i * 0.2,
-              }}
-            />
-          ))}
         </motion.div>
       </motion.div>
     </AnimatePresence>
