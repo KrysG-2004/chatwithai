@@ -26,7 +26,7 @@ export default function MessageList({
             </div>
           ) : (
             <>
-              {messages.map((message) => (
+              {messages.map((message, index) => (
                 <motion.div
                   key={message.id}
                   initial={{ opacity: 0, y: 10 }}
@@ -45,32 +45,36 @@ export default function MessageList({
                       : 'bg-gray-800/50 text-green-300 border border-green-400/20'
                   }`}>
                     {message.role === 'assistant' ? (
-                      message.content ? (
-                        <ReactMarkdown
-                          className="markdown-body text-sm"
-                          remarkPlugins={[remarkGfm]}
-                          rehypePlugins={[rehypeRaw]}
-                        >
-                          {message.content}
-                        </ReactMarkdown>
-                      ) : (
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2 text-sm">
-                            <span className="text-green-500/50">AI is thinking</span>
-                            <span className="loading-dots"/>
+                      <div>
+                        {message.content && (
+                          <ReactMarkdown
+                            className="markdown-body text-sm"
+                            remarkPlugins={[remarkGfm]}
+                            rehypePlugins={[rehypeRaw]}
+                          >
+                            {message.content}
+                          </ReactMarkdown>
+                        )}
+                        {/* 如果是最后一条消息且正在生成，显示加载状态和停止按钮 */}
+                        {index === messages.length - 1 && isGenerating && (
+                          <div className="flex items-center justify-between mt-2">
+                            <div className="flex items-center space-x-2 text-sm">
+                              <span className="text-green-500/50">AI is thinking</span>
+                              <span className="loading-dots"/>
+                            </div>
+                            {onStopGeneration && (
+                              <button
+                                onClick={onStopGeneration}
+                                className="px-2 py-1 text-xs bg-red-500/20 text-red-400 
+                                  rounded-lg hover:bg-red-500/30 transition-colors
+                                  border border-red-500/30"
+                              >
+                                停止生成
+                              </button>
+                            )}
                           </div>
-                          {isGenerating && onStopGeneration && (
-                            <button
-                              onClick={onStopGeneration}
-                              className="px-2 py-1 text-xs bg-red-500/20 text-red-400 
-                                rounded-lg hover:bg-red-500/30 transition-colors
-                                border border-red-500/30"
-                            >
-                              停止生成
-                            </button>
-                          )}
-                        </div>
-                      )
+                        )}
+                      </div>
                     ) : (
                       <div>{message.content}</div>
                     )}
