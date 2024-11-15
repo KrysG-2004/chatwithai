@@ -46,7 +46,7 @@ export default function ChatHistory({
       // 如果只有一条消息且是简单问候，直接使用特定标题
       if (messages.length === 1) {
         const firstMessage = messages[0];
-        const greetings = ['你好', '您好', 'hello', 'hi', '嗨', '在吗'];
+        const greetings = ['你好', '您好', 'hello', 'hi', '嗨', '在吗', '你在吗', 'hey', '在不在', '在么'];
         if (greetings.some(greeting => 
           firstMessage.content.toLowerCase().trim() === greeting.toLowerCase()
         )) {

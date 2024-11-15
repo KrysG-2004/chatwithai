@@ -174,10 +174,28 @@ export default function ChatInterface() {
   const { credits, useCredit } = useCredits()
   const [isGenerating, setIsGenerating] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null) as { current: AbortController | null }
-  const [creditCheckResult, setCreditCheckResult] = useState<{
-    canProceed: boolean;
-    canAnalyze: boolean;
-  }>({ canProceed: false, canAnalyze: false });
+  const [creditCheckPending, setCreditCheckPending] = useState(false)
+
+  // 添加一个积分检查函数
+  const checkCredit = useCallback(async () => {
+    if (creditCheckPending) return false;
+    
+    try {
+      setCreditCheckPending(true);
+      // 在这里扣减积分
+      const creditDoc = doc(db, 'userCredits', user?.uid || '');
+      await updateDoc(creditDoc, {
+        credits: increment(-1),
+        lastUpdated: new Date()
+      });
+      return true;
+    } catch (error) {
+      console.error('使用积分失败:', error);
+      return false;
+    } finally {
+      setCreditCheckPending(false);
+    }
+  }, [user, creditCheckPending]);
 
   const handleNewChat = useCallback(async () => {
     if (!user) return;
@@ -281,44 +299,151 @@ export default function ChatInterface() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [hasUnsavedChanges])
 
-  // 定义检查积分的函数
-  const checkCreditsForFile = useCallback(async () => {
-    try {
-      // 检查积分（需要2个积分：1个用于文件上传，1个用于AI分析）
-      const checkCredit = async () => {
-        try {
-          // 在这里扣减积分
-          const creditDoc = doc(db, 'userCredits', user?.uid || '');
-          await updateDoc(creditDoc, {
-            credits: increment(-1),
-            lastUpdated: new Date()
-          });
-          return true;
-        } catch (error) {
-          console.error('使用积分失败:', error);
-          return false;
-        }
+  // 修改发送消息函数
+  const handleSendMessage = useCallback(async (content: string) => {
+    if (!user) return;
+
+    // 检查积分
+    const canProceed = await checkCredit();
+    if (!canProceed) {
+      const systemMessage: Message = {
+        id: crypto.randomUUID(),
+        content: '您的积分不足，请前往充值页面购买积分。',
+        role: 'system',
+        createdAt: new Date().toISOString(),
+        status: 'sent'
       };
-
-      const [result1, result2] = await Promise.all([
-        checkCredit(),
-        checkCredit()
-      ]);
-
-      return result1 && result2;
-    } catch (error) {
-      console.error('积分检查失败:', error);
-      return false;
+      setMessages(prev => [...prev, systemMessage]);
+      return;
     }
-  }, [user]);
 
-  // 处理文件选择
+    // 确保有当前会话ID
+    let sessionId = currentSessionId;
+    if (!sessionId) {
+      const sessionRef = await addDoc(collection(db, 'chatSessions'), {
+        userId: user.uid,
+        title: '新对话',
+        timestamp: serverTimestamp(),
+        lastUpdated: serverTimestamp(),
+        messageCount: 0  // 初始化消息计数
+      });
+      sessionId = sessionRef.id;
+      setCurrentSessionId(sessionId);
+    }
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      content,
+      role: 'user',
+      createdAt: new Date().toISOString(),
+      status: 'sent'
+    }
+
+    const aiMessage: Message = {
+      id: crypto.randomUUID(),
+      content: '',
+      role: 'assistant',
+      createdAt: new Date().toISOString(),
+      status: 'sending'
+    }
+
+    setMessages(prev => [...prev, userMessage, aiMessage]);
+    setIsGenerating(true);
+
+    // 保存用户消息到数据库
+    await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
+      content: userMessage.content,
+      role: userMessage.role,
+      timestamp: serverTimestamp(),
+      status: userMessage.status
+    });
+
+    // 更新会话的消息计数和最后更新时间
+    await updateDoc(doc(db, 'chatSessions', sessionId), {
+      lastUpdated: serverTimestamp(),
+      messageCount: increment(1)  // 增加消息计数
+    });
+
+    try {
+      const apiMessages = messages.concat(userMessage).map(msg => ({
+        role: msg.role as 'user' | 'assistant' | 'system',
+        content: msg.content
+      }));
+
+      abortControllerRef.current = new AbortController();
+      const stream = await sendChatMessage(apiMessages, abortControllerRef.current.signal);
+      let fullContent = '';
+      let wasAborted = false;
+
+      try {
+        for await (const chunk of stream) {
+          if (chunk.choices?.[0]?.delta?.content) {
+            const content = chunk.choices[0].delta.content;
+            fullContent += content;
+            setMessages(prev => 
+              prev.map(msg => 
+                msg.id === aiMessage.id 
+                  ? { ...msg, content: fullContent }
+                  : msg
+              )
+            );
+          }
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          wasAborted = true;
+          fullContent += '\n\n[已停止生成]';
+        } else {
+          throw error;
+        }
+      }
+
+      // 保存 AI 回复到数据库
+      await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
+        content: fullContent,
+        role: 'assistant',
+        timestamp: serverTimestamp(),
+        status: 'sent'
+      });
+
+      // 更新会话的消息计数和最后更新时间
+      await updateDoc(doc(db, 'chatSessions', sessionId), {
+        lastUpdated: serverTimestamp(),
+        messageCount: increment(1)  // 增加消息计数
+      });
+
+      // 更新AI消息状态
+      setMessages(prev => 
+        prev.map(msg => 
+          msg.id === aiMessage.id 
+            ? { ...msg, content: fullContent, status: 'sent' }
+            : msg
+        )
+      );
+
+    } catch (error) {
+      console.error('AI 回复失败:', error);
+      setMessages(prev => 
+        prev.map(msg => 
+          msg.id === aiMessage.id 
+            ? { ...msg, content: '生成回复时出错，请重试', status: 'error' }
+            : msg
+        )
+      );
+    } finally {
+      setIsGenerating(false);
+      abortControllerRef.current = null;
+    }
+  }, [user, messages, currentSessionId, checkCredit]);
+
+  // 修改文件处理函数
   const handleFileSelect = useCallback(async (file: File) => {
     if (!user) return;
     
-    // 检查积分
-    const hasEnoughCredits = await checkCreditsForFile();
-    if (!hasEnoughCredits) {
+    // 检查积分（需要2个积分）
+    const canProceed = await checkCredit();
+    const canAnalyze = await checkCredit();
+    if (!canProceed || !canAnalyze) {
       const systemMessage: Message = {
         id: crypto.randomUUID(),
         content: '上传和分析文件需要2个积分。您的积分不足，请前往充值页面购买积分。',
@@ -485,14 +610,7 @@ export default function ChatInterface() {
       }
       setMessages(prev => prev.filter(msg => msg.id !== uploadingMessageId).concat(errorMessage))
     }
-  }, [user, checkCreditsForFile, setMessages, messages]);
-
-  // 在组件级别监听积分变化
-  useEffect(() => {
-    if (creditCheckResult.canProceed && creditCheckResult.canAnalyze) {
-      // 可以在这里处理积分充足的情况
-    }
-  }, [creditCheckResult]);
+  }, [user, checkCredit, setMessages, messages]);
 
   // 添加清空当前消息的处理函数
   const handleClearHistory = () => {
@@ -591,142 +709,6 @@ export default function ChatInterface() {
       setLoading(false);
     }
   }, [user, currentSessionId, messages]);
-
-  const handleSendMessage = useCallback(async (content: string) => {
-    if (!user) return;
-
-    // 检查积分
-    const canProceed = await useCredit();
-    if (!canProceed) {
-      const systemMessage: Message = {
-        id: crypto.randomUUID(),
-        content: '您的积分不足，请前往充值页面购买积分。',
-        role: 'system',
-        createdAt: new Date().toISOString(),
-        status: 'sent'
-      };
-      setMessages(prev => [...prev, systemMessage]);
-      return;
-    }
-
-    // 确保有当前会话ID
-    let sessionId = currentSessionId;
-    if (!sessionId) {
-      const sessionRef = await addDoc(collection(db, 'chatSessions'), {
-        userId: user.uid,
-        title: '新对话',
-        timestamp: serverTimestamp(),
-        lastUpdated: serverTimestamp(),
-        messageCount: 0  // 初始化消息计数
-      });
-      sessionId = sessionRef.id;
-      setCurrentSessionId(sessionId);
-    }
-
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      content,
-      role: 'user',
-      createdAt: new Date().toISOString(),
-      status: 'sent'
-    }
-
-    const aiMessage: Message = {
-      id: crypto.randomUUID(),
-      content: '',
-      role: 'assistant',
-      createdAt: new Date().toISOString(),
-      status: 'sending'
-    }
-
-    setMessages(prev => [...prev, userMessage, aiMessage]);
-    setIsGenerating(true);
-
-    // 保存用户消息到数据库
-    await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
-      content: userMessage.content,
-      role: userMessage.role,
-      timestamp: serverTimestamp(),
-      status: userMessage.status
-    });
-
-    // 更新会话的消息计数和最后更新时间
-    await updateDoc(doc(db, 'chatSessions', sessionId), {
-      lastUpdated: serverTimestamp(),
-      messageCount: increment(1)  // 增加消息计数
-    });
-
-    try {
-      const apiMessages = messages.concat(userMessage).map(msg => ({
-        role: msg.role as 'user' | 'assistant' | 'system',
-        content: msg.content
-      }));
-
-      abortControllerRef.current = new AbortController();
-      const stream = await sendChatMessage(apiMessages, abortControllerRef.current.signal);
-      let fullContent = '';
-      let wasAborted = false;
-
-      try {
-        for await (const chunk of stream) {
-          if (chunk.choices?.[0]?.delta?.content) {
-            const content = chunk.choices[0].delta.content;
-            fullContent += content;
-            setMessages(prev => 
-              prev.map(msg => 
-                msg.id === aiMessage.id 
-                  ? { ...msg, content: fullContent }
-                  : msg
-              )
-            );
-          }
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          wasAborted = true;
-          fullContent += '\n\n[已停止生成]';
-        } else {
-          throw error;
-        }
-      }
-
-      // 保存 AI 回复到数据库
-      await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
-        content: fullContent,
-        role: 'assistant',
-        timestamp: serverTimestamp(),
-        status: 'sent'
-      });
-
-      // 更新会话的消息计数和最后更新时间
-      await updateDoc(doc(db, 'chatSessions', sessionId), {
-        lastUpdated: serverTimestamp(),
-        messageCount: increment(1)  // 增加消息计数
-      });
-
-      // 更新AI消息状态
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === aiMessage.id 
-            ? { ...msg, content: fullContent, status: 'sent' }
-            : msg
-        )
-      );
-
-    } catch (error) {
-      console.error('AI 回复失败:', error);
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === aiMessage.id 
-            ? { ...msg, content: '生成回复时出错，请重试', status: 'error' }
-            : msg
-        )
-      );
-    } finally {
-      setIsGenerating(false);
-      abortControllerRef.current = null;
-    }
-  }, [user, messages, currentSessionId, useCredit]);
 
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-gray-950 to-black">
