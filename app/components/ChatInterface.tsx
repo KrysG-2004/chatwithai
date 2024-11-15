@@ -349,12 +349,18 @@ export default function ChatInterface() {
     }
   };
 
+  // 将积分检查提取到组件级别
+  const checkCreditsForFile = useCallback(async () => {
+    const canProceed = await useCredit();
+    const canAnalyze = await useCredit();
+    return { canProceed, canAnalyze };
+  }, [useCredit]);
+
   const handleFileSelect = useCallback(async (file: File) => {
     if (!user) return;
     
-    // 检查积分（需要2个积分：1个用于文件上传，1个用于AI分析）
-    const canProceed = await useCredit();
-    const canAnalyze = await useCredit();
+    // 检查积分
+    const { canProceed, canAnalyze } = await checkCreditsForFile();
     if (!canProceed || !canAnalyze) {
       // 如果积分不足，添加一条系统消息提示用户
       const systemMessage: Message = {
@@ -516,7 +522,7 @@ export default function ChatInterface() {
       }
       setMessages(prev => prev.filter(msg => msg.id !== uploadingMessageId).concat(errorMessage))
     }
-  }, [user, useCredit, setMessages]);
+  }, [user, checkCreditsForFile, setMessages, messages]);
 
   // 添加清空当前消息的处理函数
   const handleClearHistory = () => {
