@@ -371,48 +371,103 @@ export default function ChatInterface() {
       }));
 
       abortControllerRef.current = new AbortController();
-      const stream = await sendChatMessage(apiMessages, abortControllerRef.current.signal);
+      let retryCount = 0;
+      const maxRetries = 3;
       let fullContent = '';
       let wasAborted = false;
 
-      try {
-        for await (const chunk of stream) {
-          if (chunk.choices?.[0]?.delta?.content) {
-            const content = chunk.choices[0].delta.content;
-            fullContent += content;
-            setMessages(prev => 
-              prev.map(msg => 
-                msg.id === aiMessage.id 
-                  ? { ...msg, content: fullContent }
-                  : msg
-              )
-            );
+      const processStream = async () => {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ messages: apiMessages }),
+          signal: abortControllerRef.current?.signal
+        });
+
+        if (!response.ok) {
+          throw new Error('API 请求失败');
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          try {
+            const { done, value } = await reader?.read() || { done: true, value: undefined };
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                if (data === '[DONE]') continue;
+
+                try {
+                  const parsed = JSON.parse(data);
+                  if (parsed.choices?.[0]?.delta?.content) {
+                    const content = parsed.choices[0].delta.content;
+                    fullContent += content;
+                    
+                    // 使用函数形式的 setState 来确保状态更新
+                    setMessages(prev => 
+                      prev.map(msg => 
+                        msg.id === aiMessage.id 
+                          ? { ...msg, content: fullContent }
+                          : msg
+                      )
+                    );
+                  }
+                } catch (e) {
+                  console.error('解析响应数据失败:', e);
+                }
+              }
+            }
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              wasAborted = true;
+              fullContent += '\n\n[已停止生成]';
+              break;
+            }
+            throw error;
           }
         }
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          wasAborted = true;
-          fullContent += '\n\n[已停止生成]';
-        } else {
-          throw error;
+      };
+
+      // 使用重试机制
+      while (retryCount < maxRetries) {
+        try {
+          await processStream();
+          break;
+        } catch (error) {
+          retryCount++;
+          if (retryCount === maxRetries) {
+            throw error;
+          }
+          // 等待一段时间后重试
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
         }
       }
 
-      // 保存 AI 回复到数据库
-      await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
-        content: fullContent,
-        role: 'assistant',
-        timestamp: serverTimestamp(),
-        status: 'sent'
-      });
+      // 保存消息到数据库
+      if (currentSessionId) {
+        await addDoc(collection(db, 'chatSessions', currentSessionId, 'messages'), {
+          content: fullContent,
+          role: 'assistant',
+          timestamp: serverTimestamp(),
+          status: 'sent'
+        });
 
-      // 更新会话的消息计数和最后更新时间
-      await updateDoc(doc(db, 'chatSessions', sessionId), {
-        lastUpdated: serverTimestamp(),
-        messageCount: increment(1)  // 增加消息计数
-      });
+        await updateDoc(doc(db, 'chatSessions', currentSessionId), {
+          lastUpdated: serverTimestamp(),
+          messageCount: increment(1)
+        });
+      }
 
-      // 更新AI消息状态
+      // 更新消息状态
       setMessages(prev => 
         prev.map(msg => 
           msg.id === aiMessage.id 
