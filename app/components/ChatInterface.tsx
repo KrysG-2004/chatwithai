@@ -174,6 +174,10 @@ export default function ChatInterface() {
   const { credits, useCredit } = useCredits()
   const [isGenerating, setIsGenerating] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null) as { current: AbortController | null }
+  const [creditCheckResult, setCreditCheckResult] = useState<{
+    canProceed: boolean;
+    canAnalyze: boolean;
+  }>({ canProceed: false, canAnalyze: false });
 
   const handleNewChat = useCallback(async () => {
     if (!user) return;
@@ -349,19 +353,28 @@ export default function ChatInterface() {
     }
   };
 
-  // 将积分检查提取到组件级别
+  // 将积分检查移到 useEffect 中
   const checkCreditsForFile = useCallback(async () => {
-    const canProceed = await useCredit();
-    const canAnalyze = await useCredit();
-    return { canProceed, canAnalyze };
+    try {
+      const result1 = await useCredit();
+      const result2 = await useCredit();
+      setCreditCheckResult({
+        canProceed: result1,
+        canAnalyze: result2
+      });
+      return result1 && result2;
+    } catch (error) {
+      console.error('积分检查失败:', error);
+      return false;
+    }
   }, [useCredit]);
 
   const handleFileSelect = useCallback(async (file: File) => {
     if (!user) return;
     
     // 检查积分
-    const { canProceed, canAnalyze } = await checkCreditsForFile();
-    if (!canProceed || !canAnalyze) {
+    const hasEnoughCredits = await checkCreditsForFile();
+    if (!hasEnoughCredits) {
       // 如果积分不足，添加一条系统消息提示用户
       const systemMessage: Message = {
         id: crypto.randomUUID(),
@@ -523,6 +536,13 @@ export default function ChatInterface() {
       setMessages(prev => prev.filter(msg => msg.id !== uploadingMessageId).concat(errorMessage))
     }
   }, [user, checkCreditsForFile, setMessages, messages]);
+
+  // 在组件级别监听积分变化
+  useEffect(() => {
+    if (creditCheckResult.canProceed && creditCheckResult.canAnalyze) {
+      // 可以在这里处理积分充足的情况
+    }
+  }, [creditCheckResult]);
 
   // 添加清空当前消息的处理函数
   const handleClearHistory = () => {
