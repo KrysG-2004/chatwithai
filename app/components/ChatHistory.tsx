@@ -8,7 +8,7 @@ import { auth } from '@/lib/firebase'
 import { Message } from '../types/chat'
 
 interface ChatHistoryProps {
-  onSelectChat: (messages: Message[]) => void
+  onSelectChat: (sessionId: string) => void
   onClearHistory?: () => void
   onNewChat?: () => void
   currentSessionId?: string | null
@@ -40,28 +40,25 @@ export default function ChatHistory({
     try {
       setGeneratingSummary(sessionId);
       
-      // 找到第一条用户消息
-      const firstUserMessage = messages.find(m => m.role === 'user');
-      if (!firstUserMessage) return;
-
-      // 如果是简单的问候语，直接使用特定标题
-      const greetings = ['你好', '您好', 'hello', 'hi', '嗨', '在吗'];
-      if (greetings.some(greeting => 
-        firstUserMessage.content.toLowerCase().trim() === greeting.toLowerCase()
-      )) {
-        const summary = '新的对话';
-        // 更新会话摘要
-        const sessionRef = doc(db, 'chatSessions', sessionId);
-        await updateDoc(sessionRef, {
-          summary,
-          lastUpdated: serverTimestamp()
-        });
-        return;
+      // 找到前5条消息
+      const firstFiveMessages = messages.slice(0, 5);
+      
+      // 如果只有一条消息且是简单问候，直接使用特定标题
+      if (messages.length === 1) {
+        const firstMessage = messages[0];
+        const greetings = ['你好', '您好', 'hello', 'hi', '嗨', '在吗'];
+        if (greetings.some(greeting => 
+          firstMessage.content.toLowerCase().trim() === greeting.toLowerCase()
+        )) {
+          const summary = '新的对话';
+          const sessionRef = doc(db, 'chatSessions', sessionId);
+          await updateDoc(sessionRef, {
+            summary,
+            lastUpdated: serverTimestamp()
+          });
+          return;
+        }
       }
-
-      // 找到第一条用户消息后的两条消息
-      const messageIndex = messages.indexOf(firstUserMessage);
-      const relevantMessages = messages.slice(messageIndex, messageIndex + 3);
       
       // 构建提示词
       const prompt = `请为以下对话生成一个简短的标题（15字以内）。要求：
@@ -69,14 +66,23 @@ export default function ChatHistory({
 2. 不要使用"AI助手"、"对话"、"聊天"等词
 3. 如果是文件分析，要说明是什么类型的文件分析
 4. 如果是编程相关，必须用户实际问了编程问题才能用编程相关标题
-5. 如果是简单问候或简短对话，使用"新的对话"作为标题
+5. 如果是特定领域的讨论，要体现该领域的特点
+6. 标题要反映对话的主要主题
 
 对话内容：
-${relevantMessages.map(m => 
+${firstFiveMessages.map(m => 
   `${m.role === 'user' ? '用户' : 'AI'}: ${m.content.slice(0, 150)}`
 ).join('\n')}
+${messages.length > 5 ? '\n...(更多对话)' : ''}
 
-注意：标题必须真实反映用户的问题，不要过度推测或泛化。`;
+示例标题：
+- "React Hooks使用问题"
+- "PDF文档数据分析"
+- "英语语法规则讲解"
+- "数据库性能优化"
+- "前端布局设计建议"
+
+请生成一个类似的标题：`;
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -130,7 +136,8 @@ ${relevantMessages.map(m =>
 
       // 如果摘要为空或太长，使用智能提取的默认值
       if (!summary || summary.length > 15) {
-        const content = firstUserMessage.content.toLowerCase();
+        const firstUserMessage = messages.find(m => m.role === 'user');
+        const content = firstUserMessage?.content.toLowerCase() || '';
         
         if (content.includes('上传了文件')) {
           // 如果是文件分析，提取文件名和类型
@@ -138,25 +145,15 @@ ${relevantMessages.map(m =>
           const fileName = match ? match[1] : '';
           const fileType = fileName.split('.').pop()?.toUpperCase() || '';
           summary = `${fileType}文件分析：${fileName.slice(0, 10)}`;
-        } else if (content.length <= 10) {
-          // 如果是短消息，直接使用"新的对话"
-          summary = '新的对话';
         } else {
-          // 分析用户消息的内容类型，但要更严格的匹配
-          if (content.includes('javascript') || content.includes('js')) {
-            summary = content.includes('问题') ? 'JavaScript问题解答' : content.slice(0, 15);
-          } else if (content.includes('react')) {
-            summary = content.includes('问题') ? 'React开发问题' : content.slice(0, 15);
-          } else if (content.includes('python')) {
-            summary = content.includes('问题') ? 'Python编程指导' : content.slice(0, 15);
-          } else if (content.includes('sql') || content.includes('数据库')) {
-            summary = content.includes('问题') ? '数据库问题解答' : content.slice(0, 15);
-          } else if (content.includes('css') || content.includes('样式')) {
-            summary = content.includes('问题') ? 'CSS样式问题' : content.slice(0, 15);
-          } else {
-            // 直接使用用户消息的前15个字符
-            summary = content.slice(0, 15) + (content.length > 15 ? '...' : '');
-          }
+          // 从前5条消息中提取关键内容
+          const userMessages = firstFiveMessages
+            .filter(m => m.role === 'user')
+            .map(m => m.content)
+            .join(' ');
+          
+          // 提取最有意义的部分作为标题
+          summary = userMessages.slice(0, 15) + (userMessages.length > 15 ? '...' : '');
         }
       }
 
@@ -194,21 +191,25 @@ ${relevantMessages.map(m =>
       const sessions = await Promise.all(snapshot.docs.map(async doc => {
         const data = doc.data();
         
-        // 如果没有摘要，生成一个
-        if (!data.summary) {
-          const messagesRef = collection(db, 'chatSessions', doc.id, 'messages');
-          const messagesSnap = await getDocs(query(messagesRef, orderBy('timestamp')));
-          const messages = messagesSnap.docs.map(msgDoc => ({
-            id: msgDoc.id,
-            content: msgDoc.data().content || '',
-            role: msgDoc.data().role || 'user',
-            createdAt: msgDoc.data().timestamp?.toDate()?.toISOString() || new Date().toISOString(),
-            status: 'sent' as const
-          }));
+        // 获取会话的消息
+        const messagesRef = collection(db, 'chatSessions', doc.id, 'messages');
+        const messagesSnap = await getDocs(query(messagesRef, orderBy('timestamp')));
+        const messages = messagesSnap.docs.map(msgDoc => ({
+          id: msgDoc.id,
+          content: msgDoc.data().content || '',
+          role: msgDoc.data().role || 'user',
+          createdAt: msgDoc.data().timestamp?.toDate()?.toISOString() || new Date().toISOString(),
+          status: 'sent' as const
+        }));
+        
+        // 如果有消息但没有摘要，或者消息数量变化了，重新生成摘要
+        if (messages.length > 0 && (!data.summary || messages.length !== data.messageCount)) {
+          generateSummary(doc.id, messages);
           
-          if (messages.length > 0) {
-            generateSummary(doc.id, messages);
-          }
+          // 更新消息数量
+          await updateDoc(doc.ref, {
+            messageCount: messages.length
+          });
         }
 
         return {
@@ -242,7 +243,7 @@ ${relevantMessages.map(m =>
       }))
       
       // 立即更新消息列表
-      onSelectChat(initialMessages)
+      onSelectChat(sessionId)
       
       // 然后设置实时监听
       const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -259,7 +260,7 @@ ${relevantMessages.map(m =>
           messages.some((msg, i) => msg.content !== initialMessages[i]?.content)
         
         if (hasChanges) {
-          onSelectChat(messages)
+          onSelectChat(sessionId)
         }
       }, (error) => {
         console.error('监听消息变化失败:', error)
@@ -341,6 +342,11 @@ ${relevantMessages.map(m =>
     }
   }
 
+  // 修改点击会话的处理函数
+  const handleSessionClick = async (sessionId: string) => {
+    onSelectChat(sessionId);  // 直接传递 sessionId
+  };
+
   return (
     <div className="bg-black/20 m-4 p-4 rounded-xl border border-indigo-500/20 backdrop-blur-sm
       shadow-lg shadow-indigo-500/5">
@@ -384,10 +390,7 @@ ${relevantMessages.map(m =>
               }`}
             >
               <button
-                onClick={() => {
-                  loadChatMessages(session.id)
-                  onSessionChange?.(session.id)
-                }}
+                onClick={() => handleSessionClick(session.id)}
                 className="w-full text-left p-2.5 hover:bg-indigo-500/10 rounded-lg 
                   transition-all duration-200 text-indigo-300 border border-transparent
                   hover:border-indigo-500/20"

@@ -11,7 +11,7 @@ import { auth } from '@/lib/firebase'
 import { useRouter } from 'next/navigation'
 import ChatHistory from './ChatHistory'
 import { db } from '@/lib/firebase'
-import { collection, addDoc, serverTimestamp, getDocs, query, where, orderBy, limit, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore'
+import { collection, addDoc, serverTimestamp, getDocs, query, where, orderBy, limit, updateDoc, deleteDoc, doc, onSnapshot, increment } from 'firebase/firestore'
 import { useCredits } from '../hooks/useCredits'
 
 interface SetMessagesAction {
@@ -183,11 +183,13 @@ export default function ChatInterface() {
     if (!user) return;
 
     try {
+      // 创建新会话
       const sessionRef = await addDoc(collection(db, 'chatSessions'), {
         userId: user.uid,
         title: '新对话',
         timestamp: serverTimestamp(),
-        lastUpdated: serverTimestamp()
+        lastUpdated: serverTimestamp(),
+        messageCount: 1  // 添加消息计数
       });
 
       const welcomeMessage: Message = {
@@ -198,6 +200,7 @@ export default function ChatInterface() {
         status: 'sent'
       };
 
+      // 保存欢迎消息
       await addDoc(collection(db, 'chatSessions', sessionRef.id, 'messages'), {
         content: welcomeMessage.content,
         role: welcomeMessage.role,
@@ -278,104 +281,44 @@ export default function ChatInterface() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [hasUnsavedChanges])
 
-  const handleSendMessage = useHandleSendMessage(
-    user,
-    currentSessionId,
-    messages,
-    setMessages,
-    setCurrentSessionId,
-    setIsGenerating,
-    abortControllerRef,
-    useCredit
-  );
-
-  const handleSelectChat = (historicalMessages: Message[]) => {
-    setMessages(historicalMessages)
-    setHasUnsavedChanges(false)
-  }
-
-  // 手动保存当前聊天记录
-  const handleSaveChat = async () => {
-    if (!currentSessionId || !user) {
-      console.error('无法保存：没有当前会话ID或用户未登录');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      // 先删除现有消息
-      const messagesRef = collection(db, 'chatSessions', currentSessionId, 'messages');
-      const existingMessages = await getDocs(messagesRef);
-      const deletePromises = existingMessages.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
-
-      // 重新保存所有消息
-      const savePromises = messages.map(message => 
-        addDoc(collection(db, 'chatSessions', currentSessionId, 'messages'), {
-          content: message.content,
-          role: message.role,
-          timestamp: serverTimestamp(),
-          status: message.status
-        })
-      );
-      await Promise.all(savePromises);
-
-      // 更新会话的最后更新时间
-      await updateDoc(doc(db, 'chatSessions', currentSessionId), {
-        lastUpdated: serverTimestamp()
-      });
-
-      setHasUnsavedChanges(false);
-      // 可以添加一个成功提示
-      const successMessage: Message = {
-        id: crypto.randomUUID(),
-        content: '聊记录已保存',
-        role: 'system',
-        createdAt: new Date().toISOString(),
-        status: 'sent'
-      };
-      setMessages(prev => [...prev, successMessage]);
-      
-    } catch (error) {
-      console.error('保存聊天记录失败:', error);
-      // 添加错误提示消息
-      const errorMessage: Message = {
-        id: crypto.randomUUID(),
-        content: '保存失败，请重试',
-        role: 'system',
-        createdAt: new Date().toISOString(),
-        status: 'error'
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 将积分检查移到 useEffect 中
+  // 定义检查积分的函数
   const checkCreditsForFile = useCallback(async () => {
     try {
-      const result1 = await useCredit();
-      const result2 = await useCredit();
-      setCreditCheckResult({
-        canProceed: result1,
-        canAnalyze: result2
-      });
+      // 检查积分（需要2个积分：1个用于文件上传，1个用于AI分析）
+      const checkCredit = async () => {
+        try {
+          // 在这里扣减积分
+          const creditDoc = doc(db, 'userCredits', user?.uid || '');
+          await updateDoc(creditDoc, {
+            credits: increment(-1),
+            lastUpdated: new Date()
+          });
+          return true;
+        } catch (error) {
+          console.error('使用积分失败:', error);
+          return false;
+        }
+      };
+
+      const [result1, result2] = await Promise.all([
+        checkCredit(),
+        checkCredit()
+      ]);
+
       return result1 && result2;
     } catch (error) {
       console.error('积分检查失败:', error);
       return false;
     }
-  }, [useCredit]);
+  }, [user]);
 
+  // 处理文件选择
   const handleFileSelect = useCallback(async (file: File) => {
     if (!user) return;
     
     // 检查积分
     const hasEnoughCredits = await checkCreditsForFile();
     if (!hasEnoughCredits) {
-      // 如果积分不足，添加一条系统消息提示用户
       const systemMessage: Message = {
         id: crypto.randomUUID(),
         content: '上传和分析文件需要2个积分。您的积分不足，请前往充值页面购买积分。',
@@ -386,17 +329,17 @@ export default function ChatInterface() {
       setMessages(prev => [...prev, systemMessage]);
       return;
     }
-    
-    const uploadingMessageId = crypto.randomUUID()
+
+    const uploadingMessageId = crypto.randomUUID();
     const uploadingMessage: Message = {
       id: uploadingMessageId,
       content: `正在上传文件: ${file.name}...`,
       role: 'system',
       createdAt: new Date().toISOString(),
       status: 'sending'
-    }
+    };
     
-    setMessages(prev => [...prev, uploadingMessage])
+    setMessages(prev => [...prev, uploadingMessage]);
 
     try {
       const formData = new FormData()
@@ -479,21 +422,28 @@ export default function ChatInterface() {
             // 检查是否是用户手动停止
             if (error instanceof Error && error.name === 'AbortError') {
               wasAborted = true
-              // 不抛出错误，继续执行后续代码
-            } else {
-              throw error // 其他错误继续抛出
+              // 添加停止生成的提示
+              setMessages(prev => 
+                prev.map(msg => 
+                  msg.id === aiMessage.id 
+                    ? { 
+                        ...msg, 
+                        content: fullContent + '\n\n[已停止生成]',
+                        status: 'sent'
+                      }
+                    : msg
+                )
+              )
+              return // 不抛出错误，直接返回
             }
+            throw error // 其他错误继续抛出
           }
 
           // 更新AI消息状态
           setMessages(prev => 
             prev.map(msg => 
               msg.id === aiMessage.id 
-                ? { 
-                    ...msg, 
-                    content: wasAborted ? fullContent + '\n\n[已停止生成]' : fullContent,
-                    status: 'sent'
-                  }
+                ? { ...msg, content: fullContent, status: 'sent' }
                 : msg
             )
           )
@@ -564,6 +514,219 @@ export default function ChatInterface() {
       setIsGenerating(false)
     }
   }
+
+  // 添加处理选择聊天的函数
+  const handleSelectChat = useCallback(async (sessionId: string) => {
+    if (!user) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // 获取选中会话的消息
+      const messagesRef = collection(db, 'chatSessions', sessionId, 'messages');
+      const messagesQuery = query(messagesRef, orderBy('timestamp', 'asc'));
+      const messagesSnap = await getDocs(messagesQuery);
+      
+      const messages = messagesSnap.docs.map(doc => ({
+        id: doc.id,
+        content: doc.data().content || '',
+        role: doc.data().role || 'user',
+        createdAt: doc.data().timestamp?.toDate()?.toISOString() || new Date().toISOString(),
+        status: 'sent' as const
+      }));
+
+      // 更新状态
+      setCurrentSessionId(sessionId);
+      setMessages(messages);
+      setHasUnsavedChanges(false);
+      setShowHistory(false); // 在移动端选择后自动关闭侧边栏
+      
+    } catch (error) {
+      console.error('加载聊天记录失败:', error);
+      setError('加载聊天记录失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  // 添加保存聊天的函数
+  const handleSaveChat = useCallback(async () => {
+    if (!user || !currentSessionId) return;
+
+    try {
+      setLoading(true);
+      
+      // 保存所有消息到当前会话
+      const messagesRef = collection(db, 'chatSessions', currentSessionId, 'messages');
+      
+      // 清除现有消息
+      const existingMessages = await getDocs(messagesRef);
+      const deletePromises = existingMessages.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      
+      // 添加新消息
+      const savePromises = messages.map(message => 
+        addDoc(messagesRef, {
+          content: message.content,
+          role: message.role,
+          timestamp: serverTimestamp(),
+          status: message.status
+        })
+      );
+      
+      await Promise.all(savePromises);
+      
+      // 更新会话的最后更新时间
+      await updateDoc(doc(db, 'chatSessions', currentSessionId), {
+        lastUpdated: serverTimestamp()
+      });
+
+      setHasUnsavedChanges(false);
+      
+    } catch (error) {
+      console.error('保存聊天记录失败:', error);
+      setError('保存聊天记录失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [user, currentSessionId, messages]);
+
+  const handleSendMessage = useCallback(async (content: string) => {
+    if (!user) return;
+
+    // 检查积分
+    const canProceed = await useCredit();
+    if (!canProceed) {
+      const systemMessage: Message = {
+        id: crypto.randomUUID(),
+        content: '您的积分不足，请前往充值页面购买积分。',
+        role: 'system',
+        createdAt: new Date().toISOString(),
+        status: 'sent'
+      };
+      setMessages(prev => [...prev, systemMessage]);
+      return;
+    }
+
+    // 确保有当前会话ID
+    let sessionId = currentSessionId;
+    if (!sessionId) {
+      const sessionRef = await addDoc(collection(db, 'chatSessions'), {
+        userId: user.uid,
+        title: '新对话',
+        timestamp: serverTimestamp(),
+        lastUpdated: serverTimestamp(),
+        messageCount: 0  // 初始化消息计数
+      });
+      sessionId = sessionRef.id;
+      setCurrentSessionId(sessionId);
+    }
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      content,
+      role: 'user',
+      createdAt: new Date().toISOString(),
+      status: 'sent'
+    }
+
+    const aiMessage: Message = {
+      id: crypto.randomUUID(),
+      content: '',
+      role: 'assistant',
+      createdAt: new Date().toISOString(),
+      status: 'sending'
+    }
+
+    setMessages(prev => [...prev, userMessage, aiMessage]);
+    setIsGenerating(true);
+
+    // 保存用户消息到数据库
+    await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
+      content: userMessage.content,
+      role: userMessage.role,
+      timestamp: serverTimestamp(),
+      status: userMessage.status
+    });
+
+    // 更新会话的消息计数和最后更新时间
+    await updateDoc(doc(db, 'chatSessions', sessionId), {
+      lastUpdated: serverTimestamp(),
+      messageCount: increment(1)  // 增加消息计数
+    });
+
+    try {
+      const apiMessages = messages.concat(userMessage).map(msg => ({
+        role: msg.role as 'user' | 'assistant' | 'system',
+        content: msg.content
+      }));
+
+      abortControllerRef.current = new AbortController();
+      const stream = await sendChatMessage(apiMessages, abortControllerRef.current.signal);
+      let fullContent = '';
+      let wasAborted = false;
+
+      try {
+        for await (const chunk of stream) {
+          if (chunk.choices?.[0]?.delta?.content) {
+            const content = chunk.choices[0].delta.content;
+            fullContent += content;
+            setMessages(prev => 
+              prev.map(msg => 
+                msg.id === aiMessage.id 
+                  ? { ...msg, content: fullContent }
+                  : msg
+              )
+            );
+          }
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          wasAborted = true;
+          fullContent += '\n\n[已停止生成]';
+        } else {
+          throw error;
+        }
+      }
+
+      // 保存 AI 回复到数据库
+      await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
+        content: fullContent,
+        role: 'assistant',
+        timestamp: serverTimestamp(),
+        status: 'sent'
+      });
+
+      // 更新会话的消息计数和最后更新时间
+      await updateDoc(doc(db, 'chatSessions', sessionId), {
+        lastUpdated: serverTimestamp(),
+        messageCount: increment(1)  // 增加消息计数
+      });
+
+      // 更新AI消息状态
+      setMessages(prev => 
+        prev.map(msg => 
+          msg.id === aiMessage.id 
+            ? { ...msg, content: fullContent, status: 'sent' }
+            : msg
+        )
+      );
+
+    } catch (error) {
+      console.error('AI 回复失败:', error);
+      setMessages(prev => 
+        prev.map(msg => 
+          msg.id === aiMessage.id 
+            ? { ...msg, content: '生成回复时出错，请重试', status: 'error' }
+            : msg
+        )
+      );
+    } finally {
+      setIsGenerating(false);
+      abortControllerRef.current = null;
+    }
+  }, [user, messages, currentSessionId, useCredit]);
 
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-gray-950 to-black">
