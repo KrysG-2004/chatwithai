@@ -63,8 +63,8 @@ export default function ContactPage() {
         </h1>
         
         <p className="text-center mb-12 text-indigo-300/70">
-          Have questions or suggestions? We'd love to hear from you.
-          Fill out the form below and we'll get back to you as soon as possible.
+          Have questions or suggestions? We&apos;d love to hear from you.
+          Fill out the form below and we&apos;ll get back to you as soon as possible.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -126,7 +126,7 @@ export default function ContactPage() {
 
           {status === 'success' && (
             <div className="text-green-400 text-sm text-center">
-              Message sent successfully! We'll get back to you soon.
+              Message sent successfully! We&apos;ll get back to you soon.
             </div>
           )}
 
