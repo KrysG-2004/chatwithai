@@ -59,7 +59,7 @@ export default function PricingPage() {
         '24/7专属支持',
         '自定义模型训练'
       ],
-      description: '为企业级用户提供最强大的功能和最优质的服务',
+      description: 'Provide the most powerful features and the best service for enterprise-level users',
       color: 'from-pink-500/20 to-rose-500/20',
       icon: '💫'
     }
@@ -72,7 +72,7 @@ export default function PricingPage() {
     }
 
     // 暂时只显示提示信息
-    alert('支付功能正在开发中，敬请期待！')
+    alert('The payment function is under development, so stay tuned!')
   }
 
   // 修改导航逻辑
@@ -103,11 +103,11 @@ export default function PricingPage() {
           className="text-center mb-16"
         >
           <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 text-transparent bg-clip-text mb-4">
-            选择最适合你的套餐
+          Choose the package that best suits you
           </h1>
           <p className="text-purple-300/70 max-w-2xl mx-auto">
-            我们提供多种灵活的套餐选择，满足不同用户的不同需求。所有套餐都包含核心AI功能，
-            随着套餐等级提升，您将获得更多高级特性和优先支持。
+          We offer a variety of flexible package options to meet the different needs of different users. All packages include core AI features.
+          As you move up the package levels, you will get more advanced features and prioritized support
           </p>
         </motion.div>
         
@@ -171,7 +171,7 @@ export default function PricingPage() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
-                {processing === plan.credits ? '处理中...' : '立即购买'}
+                {processing === plan.credits ? 'Pending...' : 'Upgrade Now'}
               </motion.button>
               
               {/* 装饰性粒子 */}
@@ -205,8 +205,8 @@ export default function PricingPage() {
           transition={{ delay: 0.8 }}
           className="mt-16 text-center text-purple-300/50 text-sm"
         >
-          <p>所有套餐均支持随时升级或续费</p>
-          <p className="mt-2">如需企业定制方案，请联系我们的客服团队</p>
+          <p>All packages can be upgraded or renewed at any time.</p>
+          <p className="mt-2">For corporate customized solutions, please contact our customer service team</p>
         </motion.div>
       </div>
     </div>

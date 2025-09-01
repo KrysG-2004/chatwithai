@@ -13,10 +13,31 @@ import {
   RecaptchaVerifier
 } from 'firebase/auth'
 import { motion, AnimatePresence } from 'framer-motion'
+import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+
+// 在文件开头添加语言配置
+const translations = {
+  zh: {
+    login: '欢迎回来',
+    register: '创建账号',
+    phone: '手机号登录',
+    forgot: '重置密码',
+    reset: '重置密码'  // 添加 reset 模式
+  },
+  en: {
+    login: 'Welcome Back',
+    register: 'Create Account',
+    phone: 'Phone Login',
+    forgot: 'Reset Password',
+    reset: 'Reset Password'  // 添加 reset 模式
+  }
+} as const
 
 interface AuthModalProps {
   isOpen: boolean
   onClose: () => void
+  language?: 'zh' | 'en'
 }
 
 type AuthMode = 'login' | 'register' | 'phone' | 'forgot' | 'reset'
@@ -38,7 +59,7 @@ const countryCodes: CountryCode[] = [
   { code: 'KR', name: '韩国', prefix: '+82' },
 ];
 
-export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
+export default function AuthModal({ isOpen, onClose, language = 'zh' }: AuthModalProps) {
   const [mode, setMode] = useState<AuthMode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -225,6 +246,26 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     }
   }
 
+  // 初始化用户积分
+  const initializeUserCredits = async (userId: string) => {
+    try {
+      const creditDoc = doc(db, 'userCredits', userId);
+      const creditSnap = await getDoc(creditDoc);
+      
+      if (!creditSnap.exists()) {
+        // 新用户初始积分
+        await setDoc(creditDoc, {
+          userId: userId,
+          credits: 100, // 初始赠送100积分
+          lastUpdated: new Date(),
+          isNewUser: true
+        });
+      }
+    } catch (error) {
+      console.error('初始化用户积分失败:', error);
+    }
+  };
+
   // 邮箱密码登录
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -233,12 +274,19 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
     try {
       if (mode === 'login') {
-        await signInWithEmailAndPassword(auth, email, password)
-        onClose()
+        const result = await signInWithEmailAndPassword(auth, email, password)
+        // 初始化用户积分
+        if (result.user) {
+          await initializeUserCredits(result.user.uid)
+        }
       } else if (mode === 'register') {
-        await createUserWithEmailAndPassword(auth, email, password)
-        onClose()
+        const result = await createUserWithEmailAndPassword(auth, email, password)
+        // 初始化用户积分
+        if (result.user) {
+          await initializeUserCredits(result.user.uid)
+        }
       }
+      onClose()
     } catch (error) {
       setError(error instanceof Error ? error.message : '认证失败')
     } finally {
@@ -251,9 +299,16 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     try {
       setLoading(true)
       const provider = new GoogleAuthProvider()
-      await signInWithPopup(auth, provider)
+      const result = await signInWithPopup(auth, provider)
+      
+      // 初始化用户积分
+      if (result.user) {
+        await initializeUserCredits(result.user.uid)
+      }
+      
       onClose()
     } catch (error) {
+      console.error('Google 登录失败:', error)
       setError(error instanceof Error ? error.message : 'Google 登录失败')
     } finally {
       setLoading(false)
@@ -298,10 +353,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
             shadow-2xl shadow-purple-500/10 backdrop-blur-xl"
         >
           <h2 className="text-3xl font-bold text-purple-300 mb-8 font-mono text-center">
-            {mode === 'login' && '欢迎回来'}
-            {mode === 'register' && '创建账号'}
-            {mode === 'phone' && '手机号登录'}
-            {mode === 'forgot' && '重置密码'}
+            {translations[language][mode]}
           </h2>
 
           {mode === 'phone' ? (

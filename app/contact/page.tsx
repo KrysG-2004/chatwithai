@@ -9,10 +9,12 @@ import { useEffect } from 'react'
 export default function ContactPage() {
   const [user] = useAuthState(auth)
   const router = useRouter()
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [message, setMessage] = useState('')
+  const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle')
 
-  // 修改导航逻辑
   useEffect(() => {
-    // 如果用户已登录，直接添加返回路径
     if (user) {
       window.history.pushState({ from: 'contact' }, '', '/contact')
     }
@@ -30,122 +32,110 @@ export default function ContactPage() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [user, router])
 
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    message: ''
-  })
-  const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle')
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setStatus('sending')
 
     try {
-      const response = await fetch('/api/contact', {
+      const res = await fetch('/api/contact', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, message })
       })
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || '发送失败')
-      }
-
-      setStatus('success')
-      setFormData({ name: '', email: '', message: '' })
+      if (!res.ok) throw new Error('Failed to send message')
       
-      // 3秒后重置状态
-      setTimeout(() => setStatus('idle'), 3000)
+      setStatus('success')
+      setName('')
+      setEmail('')
+      setMessage('')
     } catch (error) {
-      console.error('发送失败:', error)
       setStatus('error')
-      setTimeout(() => setStatus('idle'), 3000)
     }
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setFormData(prev => ({
-      ...prev,
-      [e.target.name]: e.target.value
-    }))
-  }
-
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black py-20">
-      <div className="max-w-2xl mx-auto px-4">
-        <h1 className="text-3xl font-medium text-green-400 text-center mb-12">联系我们</h1>
+    <div className="min-h-screen bg-black text-indigo-300 py-12 px-4">
+      <div className="max-w-2xl mx-auto">
+        <h1 className="text-4xl font-bold text-center mb-8 bg-gradient-to-r 
+          from-indigo-400 to-purple-400 text-transparent bg-clip-text">
+          Contact Us
+        </h1>
         
-        <div className="bg-gray-900 rounded-xl border border-green-500/20 p-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label className="block text-green-400 mb-2 text-sm">姓名</label>
-              <input
-                type="text"
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                required
-                className="w-full bg-black/40 text-green-400 rounded-lg px-4 py-2 border border-green-500/30 focus:outline-none focus:border-green-500/50 text-sm"
-                placeholder="您的姓名"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-green-400 mb-2 text-sm">邮箱</label>
-              <input
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                required
-                className="w-full bg-black/40 text-green-400 rounded-lg px-4 py-2 border border-green-500/30 focus:outline-none focus:border-green-500/50 text-sm"
-                placeholder="your@email.com"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-green-400 mb-2 text-sm">消息</label>
-              <textarea
-                name="message"
-                value={formData.message}
-                onChange={handleChange}
-                required
-                className="w-full bg-black/40 text-green-400 rounded-lg px-4 py-2 border border-green-500/30 focus:outline-none focus:border-green-500/50 h-32 text-sm"
-                placeholder="请输入您的消息..."
-              />
-            </div>
-            
-            <button
-              type="submit"
-              disabled={status === 'sending'}
-              className={`w-full py-2 rounded-lg border transition-colors text-sm
-                ${status === 'sending' 
-                  ? 'bg-green-500/20 text-green-400/50 border-green-500/20 cursor-not-allowed'
-                  : 'bg-green-500/20 text-green-400 border-green-500/30 hover:bg-green-500/30'
-                }
-              `}
-            >
-              {status === 'sending' ? '发送中...' : '发送消息'}
-            </button>
+        <p className="text-center mb-12 text-indigo-300/70">
+          Have questions or suggestions? We'd love to hear from you.
+          Fill out the form below and we'll get back to you as soon as possible.
+        </p>
 
-            {status === 'success' && (
-              <div className="text-green-400 text-sm text-center">
-                消息已发送，我们会尽快回复您！
-              </div>
-            )}
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium mb-2">Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              className="w-full bg-black/50 border border-indigo-500/30 rounded-xl px-4 py-3
+                focus:outline-none focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20
+                text-indigo-300 placeholder-indigo-500/50"
+              placeholder="Enter your name"
+            />
+          </div>
 
-            {status === 'error' && (
-              <div className="text-red-400 text-sm text-center">
-                发送失败，稍后重试。
-              </div>
-            )}
-          </form>
-        </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full bg-black/50 border border-indigo-500/30 rounded-xl px-4 py-3
+                focus:outline-none focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20
+                text-indigo-300 placeholder-indigo-500/50"
+              placeholder="Enter your email"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Message</label>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              required
+              rows={5}
+              className="w-full bg-black/50 border border-indigo-500/30 rounded-xl px-4 py-3
+                focus:outline-none focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20
+                text-indigo-300 placeholder-indigo-500/50 resize-none"
+              placeholder="What would you like to tell us?"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={status === 'sending'}
+            className={`w-full py-3 rounded-xl bg-indigo-500/20 text-indigo-300 
+              hover:bg-indigo-500/30 transition-colors duration-300
+              border border-indigo-500/30 font-medium
+              disabled:opacity-50 disabled:cursor-not-allowed
+              ${status === 'sending' ? 'bg-indigo-500/20 text-indigo-400/50' : ''}
+              ${status === 'success' ? 'bg-green-500/20 text-green-400' : ''}
+              ${status === 'error' ? 'bg-red-500/20 text-red-400' : ''}`}
+          >
+            {status === 'sending' ? 'Sending...' : 'Send Message'}
+          </button>
+
+          {status === 'success' && (
+            <div className="text-green-400 text-sm text-center">
+              Message sent successfully! We'll get back to you soon.
+            </div>
+          )}
+
+          {status === 'error' && (
+            <div className="text-red-400 text-sm text-center">
+              Failed to send message. Please try again later.
+            </div>
+          )}
+        </form>
       </div>
     </div>
   )

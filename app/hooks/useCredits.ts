@@ -9,51 +9,33 @@ export function useCredits() {
   const router = useRouter();
 
   // 加载用户积分
-  const loadCredits = useCallback(async () => {
-    if (!auth.currentUser) return;
+  useEffect(() => {
+    if (!auth.currentUser) {
+      setCredits(null);
+      setLoading(false);
+      return;
+    }
+
+    const creditDoc = doc(db, 'userCredits', auth.currentUser.uid);
     
-    try {
-      const creditDoc = doc(db, 'userCredits', auth.currentUser.uid);
-      const creditSnap = await getDoc(creditDoc);
-      
-      if (!creditSnap.exists()) {
-        // 新用户奖励策略
-        const initialCredits = 100;
-        const welcomeBonus = 5;
-        const totalCredits = initialCredits + welcomeBonus;
-        
-        await setDoc(creditDoc, {
-          userId: auth.currentUser.uid,
-          credits: totalCredits,
+    // 实时监听积分变化
+    const unsubscribe = onSnapshot(creditDoc, (doc) => {
+      if (doc.exists()) {
+        setCredits(doc.data().credits);
+      } else {
+        // 如果文档不存在，创建初始积分
+        setDoc(creditDoc, {
+          userId: auth.currentUser!.uid,
+          credits: 100,
           lastUpdated: new Date(),
           isNewUser: true
-        });
-        setCredits(totalCredits);
-      } else {
-        setCredits(creditSnap.data().credits);
+        }).catch(console.error);
       }
-    } catch (error) {
-      console.error('加载积分失败:', error);
-    } finally {
       setLoading(false);
-    }
-  }, []);
-
-  // 实时监听积分变化
-  useEffect(() => {
-    if (!auth.currentUser) return;
-
-    const unsubscribe = onSnapshot(
-      doc(db, 'userCredits', auth.currentUser.uid),
-      (doc) => {
-        if (doc.exists()) {
-          setCredits(doc.data().credits);
-        }
-      },
-      (error) => {
-        console.error('监听积分变化失败:', error);
-      }
-    );
+    }, (error) => {
+      console.error('监听积分失败:', error);
+      setLoading(false);
+    });
 
     return () => unsubscribe();
   }, []);
@@ -105,20 +87,6 @@ export function useCredits() {
       console.error('添加积分失败:', error);
     }
   };
-
-  // 监听用户登录状态
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) {
-        loadCredits();
-      } else {
-        setCredits(null);
-        setLoading(false);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [loadCredits]);
 
   return { credits, loading, useCredit, addCredits };
 } 

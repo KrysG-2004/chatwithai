@@ -1,0 +1,28 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 用户积分文档规则
+    match /userCredits/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.credits == 100
+        && request.resource.data.userId == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // 聊天会话规则
+    match /chatSessions/{sessionId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      
+      // 聊天消息规则
+      match /messages/{messageId} {
+        allow read, write: if request.auth != null 
+          && get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.userId == request.auth.uid;
+      }
+    }
+  }
+} 

@@ -50,7 +50,7 @@ export default function ChatHistory({
         if (greetings.some(greeting => 
           firstMessage.content.toLowerCase().trim() === greeting.toLowerCase()
         )) {
-          const summary = '新的对话';
+          const summary = 'New Chat';
           const sessionRef = doc(db, 'chatSessions', sessionId);
           await updateDoc(sessionRef, {
             summary,
@@ -68,6 +68,7 @@ export default function ChatHistory({
 4. 如果是编程相关，必须用户实际问了编程问题才能用编程相关标题
 5. 如果是特定领域的讨论，要体现该领域的特点
 6. 标题要反映对话的主要主题
+7.如果用户使用的是英语，就用英语
 
 对话内容：
 ${firstFiveMessages.map(m => 
@@ -97,7 +98,7 @@ ${messages.length > 5 ? '\n...(更多对话)' : ''}
         })
       });
 
-      if (!response.ok) throw new Error('生成摘要失败');
+      if (!response.ok) throw new Error('Fail to make a prompt');
 
       const reader = response.body?.getReader();
       let summary = '';

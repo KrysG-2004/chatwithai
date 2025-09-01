@@ -52,18 +52,18 @@ export default function AboutModal() {
         <div className="space-y-3 mt-6">
           {[
             {
-              title: "智能对话",
-              description: "基于最新的 AI 模型，提供流畅自然的对话体验",
+              title: "Smart Chat",
+              description: "Advanced AI model with natural conversation flow",
               icon: "💡"
             },
             {
-              title: "文件分析",
-              description: "支持多种文件格式的智能分析和内容理解",
+              title: "File Analysis",
+              description: "Intelligent analysis of multiple file formats",
               icon: "📄"
             },
             {
-              title: "历史记录",
-              description: "自动保存并智能总结对话内容，随时回顾",
+              title: "History Management",
+              description: "Auto-save and manage chat history with smart summaries",
               icon: "📚"
             }
           ].map((feature, index) => (
@@ -103,20 +103,20 @@ export default function AboutModal() {
           ))}
         </div>
 
-        {/* 新增：详细功能介绍 */}
+        {/* Core Features */}
         <div className="mt-8 space-y-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.7 }}
           >
-            <h4 className="text-sm font-medium mb-3 text-indigo-200">核心功能</h4>
+            <h4 className="text-sm font-medium mb-3 text-indigo-200">Core Features</h4>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { icon: "🤖", text: "GPT-4 模型支持" },
-                { icon: "⚡", text: "实时流式响应" },
-                { icon: "🔄", text: "上下文连续对话" },
-                { icon: "🎯", text: "精准意图理解" }
+                { icon: "🤖", text: "GPT-4 Model" },
+                { icon: "⚡", text: "Real-time Response" },
+                { icon: "🔄", text: "Context Awareness" },
+                { icon: "🎯", text: "Precise Understanding" }
               ].map((item, i) => (
                 <motion.div
                   key={i}
@@ -137,13 +137,13 @@ export default function AboutModal() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.8 }}
           >
-            <h4 className="text-sm font-medium mb-3 text-indigo-200">文件支持</h4>
+            <h4 className="text-sm font-medium mb-3 text-indigo-200">File Support</h4>
             <div className="grid grid-cols-2 gap-2 text-xs">
               {[
-                "PDF 文档解析",
-                "Word 文档处理",
-                "TXT 文本分析",
-                "Markdown 支持"
+                "PDF Analysis",
+                "Word Processing",
+                "Text Analysis",
+                "Markdown Support"
               ].map((text, i) => (
                 <motion.div
                   key={i}
@@ -162,20 +162,20 @@ export default function AboutModal() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.9 }}
           >
-            <h4 className="text-sm font-medium mb-3 text-indigo-200">高级特性</h4>
+            <h4 className="text-sm font-medium mb-3 text-indigo-200">Advanced Features</h4>
             <div className="space-y-2">
               {[
                 {
-                  title: "智能摘要生成",
-                  desc: "自动总结对话内容，快速回顾重点"
+                  title: "Smart Summary",
+                  desc: "Auto-generate conversation summaries"
                 },
                 {
-                  title: "多设备同步",
-                  desc: "云端数据同步，随时随地访问对话历史"
+                  title: "Multi-device Sync",
+                  desc: "Access chat history from anywhere"
                 },
                 {
-                  title: "隐私保护",
-                  desc: "端到端加密，确保数据安全"
+                  title: "Privacy Protection",
+                  desc: "End-to-end encryption for data security"
                 }
               ].map((item, i) => (
                 <motion.div
@@ -191,32 +191,32 @@ export default function AboutModal() {
             </div>
           </motion.div>
 
-          {/* 技术规格 */}
+          {/* Technical Specs */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 1 }}
             className="pt-4 border-t border-indigo-500/20"
           >
-            <h4 className="text-sm font-medium mb-3 text-indigo-200">技术规格</h4>
+            <h4 className="text-sm font-medium mb-3 text-indigo-200">Technical Specs</h4>
             <div className="grid grid-cols-2 gap-4 text-xs text-indigo-300/70">
               <div>
-                <span className="text-indigo-300">模型版本：</span>GPT-4
+                <span className="text-indigo-300">Model: </span>GPT-4
               </div>
               <div>
-                <span className="text-indigo-300">响应速度：</span>≤ 50ms
+                <span className="text-indigo-300">Response: </span>≤ 50ms
               </div>
               <div>
-                <span className="text-indigo-300">文件大小：</span>≤ 10MB
+                <span className="text-indigo-300">File Size: </span>≤ 10MB
               </div>
               <div>
-                <span className="text-indigo-300">支持格式：</span>多种类型
+                <span className="text-indigo-300">Formats: </span>Multiple
               </div>
             </div>
           </motion.div>
         </div>
 
-        {/* Version & Credits 部分移到最后 */}
+        {/* Version & Credits */}
         <motion.div 
           className="mt-8 pt-4 border-t border-indigo-500/20 text-center text-xs text-indigo-300/50"
           initial={{ opacity: 0 }}

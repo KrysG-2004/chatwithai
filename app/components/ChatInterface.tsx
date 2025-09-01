@@ -37,7 +37,7 @@ const useHandleSendMessage = (
       // 如果积分不足，添加一条系统消息提示用户
       const systemMessage: Message = {
         id: crypto.randomUUID(),
-        content: '您的积分不足，请前往充值页面购买积分。',
+        content: 'You do not have enough points, please go to the recharge page to buy points.',
         role: 'system',
         createdAt: new Date().toISOString(),
         status: 'sent'
@@ -143,7 +143,7 @@ const useHandleSendMessage = (
         );
 
       } catch (error) {
-        console.error('AI 回复失败:', error);
+        console.error('AI Failure to respond:', error);
         setMessages((prev: Message[]) => 
           prev.map((msg: Message) => 
             msg.id === aiMessage.id 
@@ -157,7 +157,7 @@ const useHandleSendMessage = (
       }
 
     } catch (error) {
-      console.error('保存消息失败:', error);
+      console.error('Fail to save message', error);
     }
   };
 };
@@ -190,7 +190,7 @@ export default function ChatInterface() {
       });
       return true;
     } catch (error) {
-      console.error('使用积分失败:', error);
+      console.error('Failed to use points.', error);
       return false;
     } finally {
       setCreditCheckPending(false);
@@ -204,7 +204,7 @@ export default function ChatInterface() {
       // 创建新会话
       const sessionRef = await addDoc(collection(db, 'chatSessions'), {
         userId: user.uid,
-        title: '新对话',
+        title: 'New Chat',
         timestamp: serverTimestamp(),
         lastUpdated: serverTimestamp(),
         messageCount: 1  // 添加消息计数
@@ -212,7 +212,7 @@ export default function ChatInterface() {
 
       const welcomeMessage: Message = {
         id: crypto.randomUUID(),
-        content: '你好！我是 AI 助手，有什么我可以帮你的吗？',
+        content: 'Hi, I am AI Assistant, how can I help you?',
         role: 'assistant',
         createdAt: new Date().toISOString(),
         status: 'sent'
@@ -230,7 +230,7 @@ export default function ChatInterface() {
       setMessages([welcomeMessage]);
       setShowHistory(false);
     } catch (error) {
-      console.error('创建新聊天失败:', error);
+      console.error('Failed to create new chat.', error);
     }
   }, [user]);
 
@@ -271,7 +271,7 @@ export default function ChatInterface() {
         setHasUnsavedChanges(false);
       }
     } catch (error) {
-      console.error('加载最近聊天失败:', error);
+      console.error('Failed to load recent chats.', error);
       setMessages([]);
       setCurrentSessionId(null);
     }
@@ -289,7 +289,7 @@ export default function ChatInterface() {
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasUnsavedChanges) {
-        const message = '您有未保存的聊天记录，确定要离开吗？'
+        const message = 'You have unsaved chats, sure you want to leave?'
         e.preventDefault()
         return message
       }
@@ -308,7 +308,7 @@ export default function ChatInterface() {
     if (!canProceed) {
       const systemMessage: Message = {
         id: crypto.randomUUID(),
-        content: '您的积分不足，请前往充值页面购买积分。',
+        content: 'You do not have enough points, please go to the recharge page to buy points.',
         role: 'system',
         createdAt: new Date().toISOString(),
         status: 'sent'
@@ -322,7 +322,7 @@ export default function ChatInterface() {
     if (!sessionId) {
       const sessionRef = await addDoc(collection(db, 'chatSessions'), {
         userId: user.uid,
-        title: '新对话',
+        title: 'New Chat',
         timestamp: serverTimestamp(),
         lastUpdated: serverTimestamp(),
         messageCount: 0  // 初始化消息计数
